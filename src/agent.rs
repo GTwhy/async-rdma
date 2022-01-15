@@ -1,9 +1,12 @@
 use crate::{
-    memory_region::{LocalMemoryRegion, MemoryRegionToken, RemoteMemoryRegion},
+    completion_queue::WorkRequestId,
+    memory_region::{
+        LocalMemoryRegion, MemoryRegionToken, RemoteMemoryRegion,
+    },
     mr_allocator::MRAllocator,
     queue_pair::QueuePair,
 };
-use rand::Rng;
+use lockfree_cuckoohash::{pin, LockFreeCuckooHash};
 use serde::{Deserialize, Serialize};
 use std::{
     alloc::Layout,
@@ -15,14 +18,12 @@ use std::{
 };
 use tokio::{
     sync::{
-        mpsc::{channel, Receiver, Sender},
-        oneshot, Mutex,
+        mpsc::{channel, Receiver, Sender}, Mutex,
     },
     task::JoinHandle,
 };
 use tracing::{debug, trace};
 use utilities::{Cast, OverflowArithmetic};
-
 /// An agent for handling the dirty rdma request and async events
 #[derive(Debug)]
 pub struct Agent {
@@ -53,7 +54,7 @@ impl Agent {
         allocator: Arc<MRAllocator>,
         max_message_len: usize,
     ) -> io::Result<Self> {
-        let response_waits = Arc::new(Mutex::new(HashMap::new()));
+        let response_waits = Arc::new(LockFreeCuckooHash::new());
         let mr_own = Arc::new(Mutex::new(HashMap::new()));
         let (local_mr_send, local_mr_recv) = channel(1024);
         let (remote_mr_send, remote_mr_recv) = channel(1024);
@@ -119,7 +120,7 @@ impl Agent {
             SendMRKind::Remote(mr.token())
         };
         let request = Request {
-            request_id: RequestId::new(),
+            request_id: WorkRequestId::new(),
             kind: RequestKind::SendMR(SendMRRequest { kind: request }),
         };
         // this response is not important
@@ -155,7 +156,7 @@ impl Agent {
         while start < lm_len {
             let end = (start.overflow_add(max_content_len)).min(lm_len);
             let request = Request {
-                request_id: RequestId::new(),
+                request_id: WorkRequestId::new(),
                 kind: RequestKind::SendData(SendDataRequest {
                     len: end.overflow_sub(start),
                 }),
@@ -367,12 +368,11 @@ impl AgentThread {
     /// response handler
     async fn handle_response(self: Arc<Self>, response: Response) -> io::Result<()> {
         trace!("handle response");
+        let guard = pin();
         let sender = self
             .inner
             .response_waits
-            .lock()
-            .await
-            .remove(&response.request_id)
+            .remove_with_guard(&response.request_id, &guard)
             .ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::Other,
@@ -382,7 +382,7 @@ impl AgentThread {
                     ),
                 )
             })?;
-        match sender.send(Ok(response.kind)) {
+        match sender.try_send(Ok(response.kind)) {
             Ok(_) => Ok(()),
             Err(_) => Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -426,7 +426,7 @@ pub struct AgentInner {
     /// The Queue Pair used to communicate with other side
     qp: Arc<QueuePair>,
     /// The map holding the waiters that waits the response
-    response_waits: Arc<Mutex<ResponseWaitsMap>>,
+    response_waits: ResponseWaitsMap,
     /// The Mrs owned by this agent
     mr_own: Arc<Mutex<HashMap<MemoryRegionToken, Arc<LocalMemoryRegion>>>>,
     /// MR allocator that creating new memory regions
@@ -446,7 +446,7 @@ impl AgentInner {
             align: layout.align(),
         };
         let request = Request {
-            request_id: RequestId::new(),
+            request_id: WorkRequestId::new(),
             kind: RequestKind::AllocMR(request),
         };
         let response = self.send_request(request).await?;
@@ -466,7 +466,7 @@ impl AgentInner {
     /// Release a remote MR got from the other side
     pub async fn release_mr(&self, token: MemoryRegionToken) -> io::Result<()> {
         let request = Request {
-            request_id: RequestId::new(),
+            request_id: WorkRequestId::new(),
             kind: RequestKind::ReleaseMR(ReleaseMRRequest { token }),
         };
         let _response = self.send_request(request).await?;
@@ -481,16 +481,20 @@ impl AgentInner {
     /// Send a request with data appended
     async fn send_request_append_data(
         &self,
-        request: Request,
+        mut request: Request,
         lm: &[&LocalMemoryRegion],
     ) -> io::Result<ResponseKind> {
-        let (send, recv) = oneshot::channel();
+        let (tx, mut rx) = channel(2);
         // As request is always newly created, it's impossible to find it in the response_waits
-        let _old = self
-            .response_waits
-            .lock()
-            .await
-            .insert(request.request_id, send);
+        loop {
+            if self
+                .response_waits
+                .insert_if_not_exists(request.request_id, tx.clone())
+            {
+                break;
+            }
+            request.request_id = WorkRequestId::new();
+        }
 
         let mut buf = self
             .allocator
@@ -510,10 +514,9 @@ impl AgentInner {
         let lms_len: usize = lms.iter().map(|l| l.length()).sum();
         assert!(lms_len <= self.max_message_len);
         self.qp.send_sge(&lms).await?;
-        let ans = recv
+        rx.recv()
             .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        ans
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "agent is dropped"))?
     }
 
     /// Send a response to the other side
@@ -539,7 +542,7 @@ impl AgentInner {
 lazy_static! {
     static ref SEND_DATA_OFFSET: usize = {
         let request = Request {
-            request_id: RequestId::new(),
+            request_id: WorkRequestId::new(),
             kind: RequestKind::SendData(SendDataRequest { len: 0 }),
         };
         let message = Message::Request(request);
@@ -550,18 +553,7 @@ lazy_static! {
 }
 
 /// The map for the task waiters, these tasks have submitted the RDMA request but haven't got the result
-type ResponseWaitsMap = HashMap<RequestId, oneshot::Sender<io::Result<ResponseKind>>>;
-
-/// The Id for each RDMA request
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
-struct RequestId(usize);
-
-impl RequestId {
-    /// Randomly generate a request id
-    fn new() -> Self {
-        Self(rand::thread_rng().gen())
-    }
-}
+type ResponseWaitsMap = Arc<LockFreeCuckooHash<WorkRequestId, Sender<io::Result<ResponseKind>>>>;
 
 /// Request to alloc a remote MR
 #[derive(Serialize, Deserialize)]
@@ -644,7 +636,7 @@ enum RequestKind {
 #[derive(Serialize, Deserialize)]
 struct Request {
     /// Request id
-    request_id: RequestId,
+    request_id: WorkRequestId,
     /// The type of the request
     kind: RequestKind,
 }
@@ -666,7 +658,7 @@ enum ResponseKind {
 #[derive(Serialize, Deserialize)]
 struct Response {
     /// Request id
-    request_id: RequestId,
+    request_id: WorkRequestId,
     /// The type of the response
     kind: ResponseKind,
 }

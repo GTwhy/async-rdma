@@ -267,7 +267,7 @@ async fn main() {
     std::thread::spawn(|| Server::start("127.0.0.1:5555"));
     println!("rpc server started");
     //sleep for a second to wait for the server to start
-    tokio::time::sleep(Duration::new(1, 0)).await;
+    tokio::time::sleep(Duration::new(3, 0)).await;
     let msg_hello = String::from("hello");
     let msg_world = String::from("world");
     let client = Client::new("127.0.0.1:5555").await;

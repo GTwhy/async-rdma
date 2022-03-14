@@ -56,6 +56,7 @@ rdma link | grep $RXE_DEV
 
 # Cargo run async-rdma
 cargo build
+RUST_LOG=debug cargo run --example loop
 cargo test
 timeout 3 target/debug/examples/server &
 sleep 1

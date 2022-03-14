@@ -97,7 +97,7 @@ mod test2 {
             // `send` without `sleep`, the receiver will be too busy to response sender.
             // So the sender's RDMA netdev will retry again and again which make the situation worse.
             // You can skip this `sleep` if your receiver's machine is fast enough.
-            tokio::time::sleep(Duration::from_millis(1)).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
             handles.push(tokio::spawn(async move {
                 let lm = rdma_clone.alloc_local_mr(Layout::new::<i32>()).unwrap();
                 unsafe { *(lm.as_ptr() as *mut i32) = 5 };

@@ -49,6 +49,10 @@ impl CompletionQueue {
             ibv_req_notify_cq(self.inner_cq.as_ptr(), if solicited_only { 1 } else { 0 })
         };
         if errno != 0_i32 {
+            println!(
+                "req_notify, err info : {:?}",
+                io::Error::from_raw_os_error(0_i32.sub(errno))
+            );
             return Err(io::Error::from_raw_os_error(0_i32.sub(errno)));
         }
         Ok(())

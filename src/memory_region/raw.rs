@@ -50,7 +50,13 @@ impl RawMemoryRegion {
     ) -> io::Result<Self> {
         let inner_mr =
             NonNull::new(unsafe { ibv_reg_mr(pd.as_ptr(), addr.cast(), len, access.0.cast()) })
-                .ok_or_else(io::Error::last_os_error)?;
+                .ok_or_else({
+                    println!(
+                "ibv_reg_mr err, arguments:\n pd:{:?},\n addr:{:?},\n len:{:?},\n access:{:?}\n",
+                pd, addr, len, access
+            );
+                    io::Error::last_os_error
+                })?;
         Ok(Self {
             inner_mr,
             addr,
@@ -76,5 +82,6 @@ impl Drop for RawMemoryRegion {
     fn drop(&mut self) {
         let errno = unsafe { ibv_dereg_mr(self.inner_mr.as_ptr()) };
         assert_eq!(errno, 0_i32);
+        println!("raw mr droped : addr:{:?}, len:{:?}", self.addr, self.len);
     }
 }

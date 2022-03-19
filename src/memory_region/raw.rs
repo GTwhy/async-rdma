@@ -50,7 +50,13 @@ impl RawMemoryRegion {
     ) -> io::Result<Self> {
         let inner_mr =
             NonNull::new(unsafe { ibv_reg_mr(pd.as_ptr(), addr.cast(), len, access.0.cast()) })
-                .ok_or_else(io::Error::last_os_error)?;
+                .ok_or_else(|| {
+                    println!(
+                        "reg mem err \n addr: {:?}\n, len:{:?}\n, access: {:?}\n ",
+                        addr, len, access
+                    );
+                    io::Error::last_os_error()
+                })?;
         Ok(Self {
             inner_mr,
             addr,

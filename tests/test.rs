@@ -32,7 +32,7 @@ fn test_server_client<
     c: RdmaFn<CR>,
 ) -> io::Result<()> {
     let server = std::thread::spawn(move || server(addr, s));
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    std::thread::sleep(std::time::Duration::from_secs(3));
     let client = std::thread::spawn(move || client(addr, c));
     client.join().unwrap()?;
     server.join().unwrap()
@@ -65,46 +65,47 @@ mod test1 {
 // FIXME:
 // This test has a certain probability of being blocked,
 // a task cannot recvieved data, and then cannot exit normally.
-// mod test2 {
-//     use crate::*;
-//     use std::{alloc::Layout, sync::Arc};
+mod test2 {
+    use async_rdma::MrAccess;
+    use crate::*;
+    use std::{alloc::Layout, sync::Arc};
 
-//     async fn server(rdma: Rdma) -> io::Result<()> {
-//         let rdma = Arc::new(rdma);
-//         let mut handles = vec![];
-//         for _ in 0..10 {
-//             let rdma_clone = rdma.clone();
-//             handles.push(tokio::spawn(async move {
-//                 let lm = rdma_clone.receive().await.unwrap();
-//                 assert_eq!(unsafe { *(lm.as_ptr() as *mut i32) }, 5);
-//                 assert_eq!(lm.length(), 4);
-//             }));
-//         }
-//         for handle in handles {
-//             handle.await.unwrap();
-//         }
-//         Ok(())
-//     }
+    async fn server(rdma: Rdma) -> io::Result<()> {
+        let rdma = Arc::new(rdma);
+        let mut handles = vec![];
+        for _ in 0..10 {
+            let rdma_clone = rdma.clone();
+            handles.push(tokio::spawn(async move {
+                let lm = rdma_clone.receive().await.unwrap();
+                assert_eq!(unsafe { *(lm.as_ptr() as *mut i32) }, 5);
+                assert_eq!(lm.length(), 4);
+            }));
+        }
+        for handle in handles {
+            handle.await.unwrap();
+        }
+        Ok(())
+    }
 
-//     async fn client(rdma: Rdma) -> io::Result<()> {
-//         let rdma = Arc::new(rdma);
-//         let mut handles = vec![];
-//         for _ in 0..10 {
-//             let rdma_clone = rdma.clone();
-//             handles.push(tokio::spawn(async move {
-//                 let lm = rdma_clone.alloc_local_mr(Layout::new::<i32>()).unwrap();
-//                 unsafe { *(lm.as_ptr() as *mut i32) = 5 };
-//                 rdma_clone.send(&lm).await.unwrap();
-//             }));
-//         }
-//         for handle in handles {
-//             handle.await.unwrap();
-//         }
-//         Ok(())
-//     }
+    async fn client(rdma: Rdma) -> io::Result<()> {
+        let rdma = Arc::new(rdma);
+        let mut handles = vec![];
+        for _ in 0..10 {
+            let rdma_clone = rdma.clone();
+            handles.push(tokio::spawn(async move {
+                let lm = rdma_clone.alloc_local_mr(Layout::new::<i32>()).unwrap();
+                unsafe { *(lm.as_ptr() as *mut i32) = 5 };
+                rdma_clone.send(&lm).await.unwrap();
+            }));
+        }
+        for handle in handles {
+            handle.await.unwrap();
+        }
+        Ok(())
+    }
 
-//     #[test]
-//     fn test() -> io::Result<()> {
-//         test_server_client("127.0.0.1:18001", server, client)
-//     }
-// }
+    #[test]
+    fn test() -> io::Result<()> {
+        test_server_client("127.0.0.1:18001", server, client)
+    }
+}

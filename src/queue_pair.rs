@@ -32,6 +32,9 @@ use tokio::{
 };
 use tracing::debug;
 
+/// pub(crate) static `MAX_RECV_WR`
+pub(crate) static MAX_RECV_WR: u32 = 5;
+
 /// Queue pair initialized attribute
 struct QueuePairInitAttr {
     /// Internal `ibv_qp_init_attr` structure
@@ -46,7 +49,7 @@ impl Default for QueuePairInitAttr {
         qp_init_attr.recv_cq = ptr::null_mut::<ibv_cq>().cast();
         qp_init_attr.srq = ptr::null_mut::<ibv_cq>().cast();
         qp_init_attr.cap.max_send_wr = 10;
-        qp_init_attr.cap.max_recv_wr = 10;
+        qp_init_attr.cap.max_recv_wr = MAX_RECV_WR;
         qp_init_attr.cap.max_send_sge = 10;
         qp_init_attr.cap.max_recv_sge = 10;
         qp_init_attr.cap.max_inline_data = 0;

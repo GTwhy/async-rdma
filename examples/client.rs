@@ -37,7 +37,7 @@ async fn send_data_to_server(rdma: &Rdma) {
 async fn main() {
     tracing_subscriber::fmt::init();
     debug!("client start");
-    let rdma = Rdma::connect("127.0.0.1:5555", 1, 1, 512).await.unwrap();
+    let rdma = Rdma::connect("127.0.0.1:5555", 1, 1, 128).await.unwrap();
     send_lmr_to_server(&rdma).await;
     request_then_write(&rdma).await;
     send_data_to_server(&rdma).await;

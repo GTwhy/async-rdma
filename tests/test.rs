@@ -9,7 +9,7 @@ async fn server<A: ToSocketAddrs, R: Future<Output = Result<(), io::Error>>>(
     addr: A,
     f: RdmaFn<R>,
 ) -> io::Result<()> {
-    let rdma = RdmaListener::bind(addr).await?.accept(1, 1, 64).await?;
+    let rdma = RdmaListener::bind(addr).await?.accept(1, 1, 128).await?;
     f(rdma).await
 }
 
@@ -18,7 +18,7 @@ async fn client<A: ToSocketAddrs, R: Future<Output = Result<(), io::Error>>>(
     addr: A,
     f: RdmaFn<R>,
 ) -> io::Result<()> {
-    let rdma = Rdma::connect(addr, 1, 1, 64).await?;
+    let rdma = Rdma::connect(addr, 1, 1, 128).await?;
     f(rdma).await
 }
 

@@ -14,7 +14,7 @@ mod send_with_imm {
     static MSG: &str = "hello world";
 
     async fn client(addr: SocketAddrV4) -> io::Result<()> {
-        let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+        let rdma = Rdma::connect(addr, 1, 1, 128).await?;
         let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
         // put data into lmr
         unsafe { std::ptr::write(lmr.as_mut_ptr() as *mut Data, Data(MSG.to_string())) };
@@ -29,7 +29,7 @@ mod send_with_imm {
     #[tokio::main]
     async fn server(addr: SocketAddrV4) -> io::Result<()> {
         let rdma_listener = RdmaListener::bind(addr).await?;
-        let rdma = rdma_listener.accept(1, 1, 512).await?;
+        let rdma = rdma_listener.accept(1, 1, 128).await?;
         // receive the data and imm sent by the client
         let (lmr, imm) = rdma.receive_with_imm().await?;
         assert_eq!(imm, Some(IMM_NUM));
@@ -79,7 +79,7 @@ mod write_with_imm {
     static MSG: &str = "hello world";
 
     async fn client(addr: SocketAddrV4) -> io::Result<()> {
-        let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+        let rdma = Rdma::connect(addr, 1, 1, 128).await?;
         let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
         let mut rmr = rdma.request_remote_mr(Layout::new::<Data>()).await?;
         unsafe { std::ptr::write(lmr.as_mut_ptr() as *mut Data, Data(MSG.to_string())) };
@@ -93,7 +93,7 @@ mod write_with_imm {
     #[tokio::main]
     async fn server(addr: SocketAddrV4) -> io::Result<()> {
         let rdma_listener = RdmaListener::bind(addr).await?;
-        let rdma = rdma_listener.accept(1, 1, 512).await?;
+        let rdma = rdma_listener.accept(1, 1, 128).await?;
         // receive the immediate data sent by `write_with_imm`
         let imm = rdma.receive_write_imm().await?;
         assert_eq!(imm, IMM_NUM);

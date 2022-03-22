@@ -35,7 +35,7 @@ mod local_mr_slice {
     }
 
     async fn client(addr: SocketAddrV4) {
-        let _rdma = Rdma::connect(addr, 1, 1, 512).await.unwrap();
+        let _rdma = Rdma::connect(addr, 1, 1, 128).await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -60,7 +60,7 @@ mod local_mr_slice_overbound {
         }
 
         async fn client(addr: SocketAddrV4) {
-            let _rdma = Rdma::connect(addr, 1, 1, 512).await.unwrap();
+            let _rdma = Rdma::connect(addr, 1, 1, 128).await.unwrap();
         }
 
         // #[tokio::test] has a default single-threaded test runtime that may cause a dead lock.
@@ -84,7 +84,7 @@ mod local_mr_slice_overbound {
         }
 
         async fn client(addr: SocketAddrV4) {
-            let _rdma = Rdma::connect(addr, 1, 1, 512).await.unwrap();
+            let _rdma = Rdma::connect(addr, 1, 1, 128).await.unwrap();
         }
 
         // #[tokio::test] has a default single-threaded test runtime that may cause a dead lock.
@@ -108,7 +108,7 @@ mod local_mr_slice_overbound {
         }
 
         async fn client(addr: SocketAddrV4) {
-            let _rdma = Rdma::connect(addr, 1, 1, 512).await.unwrap();
+            let _rdma = Rdma::connect(addr, 1, 1, 128).await.unwrap();
         }
 
         // #[tokio::test] has a default single-threaded test runtime that may cause a dead lock.
@@ -132,7 +132,7 @@ mod remote_mr_slice {
     }
 
     async fn client(addr: SocketAddrV4) {
-        let rdma = Rdma::connect(addr, 1, 1, 512).await.unwrap();
+        let rdma = Rdma::connect(addr, 1, 1, 128).await.unwrap();
         let rmr = rdma.receive_remote_mr().await.unwrap();
         assert_eq!(rmr.length(), LEN);
         let s1 = rmr.get(0..LEN).unwrap();
@@ -175,7 +175,7 @@ mod remote_mr_slice_overbound {
         }
 
         async fn client(addr: SocketAddrV4) {
-            let rdma = Rdma::connect(addr, 1, 1, 512).await.unwrap();
+            let rdma = Rdma::connect(addr, 1, 1, 128).await.unwrap();
             let rmr = rdma.receive_remote_mr().await.unwrap();
             assert_eq!(rmr.length(), LEN);
             #[allow(clippy::reversed_empty_ranges)]
@@ -202,7 +202,7 @@ mod remote_mr_slice_overbound {
         }
 
         async fn client(addr: SocketAddrV4) {
-            let rdma = Rdma::connect(addr, 1, 1, 512).await.unwrap();
+            let rdma = Rdma::connect(addr, 1, 1, 128).await.unwrap();
             let rmr = rdma.receive_remote_mr().await.unwrap();
             assert_eq!(rmr.length(), LEN);
             let _s1 = rmr.get(0..0).unwrap();
@@ -228,7 +228,7 @@ mod remote_mr_slice_overbound {
         }
 
         async fn client(addr: SocketAddrV4) {
-            let rdma = Rdma::connect(addr, 1, 1, 512).await.unwrap();
+            let rdma = Rdma::connect(addr, 1, 1, 128).await.unwrap();
             let rmr = rdma.receive_remote_mr().await.unwrap();
             assert_eq!(rmr.length(), LEN);
             let _s1 = rmr.get(0..LEN + 1).unwrap();

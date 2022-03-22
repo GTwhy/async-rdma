@@ -103,7 +103,7 @@ use std::{
 struct Data(String);
 
 async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+    let rdma = Rdma::connect(addr, 1, 1, 128).await?;
     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     let mut rmr = rdma.request_remote_mr(Layout::new::<Data>()).await?;
     // then send this mr to server to make server aware of this mr.
@@ -117,7 +117,7 @@ async fn client(addr: SocketAddrV4) -> io::Result<()> {
 #[tokio::main]
 async fn server(addr: SocketAddrV4) -> io::Result<()> {
     let rdma_listener = RdmaListener::bind(addr).await?;
-    let rdma = rdma_listener.accept(1, 1, 512).await?;
+    let rdma = rdma_listener.accept(1, 1, 128).await?;
     let lmr = rdma.receive_local_mr().await?;
     // print the content of lmr, which was `write` by client
     unsafe { println!("{}", &*(*(lmr.as_ptr() as *const Data)).0) };

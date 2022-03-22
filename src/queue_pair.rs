@@ -34,7 +34,7 @@ use tokio::{
 /// Maximum value of `send_wr`
 pub(crate) static MAX_SEND_WR: u32 = 10;
 /// Maximum value of `recv_wr`
-pub(crate) static MAX_RECV_WR: u32 = 1;
+pub(crate) static MAX_RECV_WR: u32 = 10;
 /// Maximum value of `send_sge`
 pub(crate) static MAX_SEND_SGE: u32 = 10;
 /// Maximum value of `recv_sge`

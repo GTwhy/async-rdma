@@ -29,7 +29,7 @@
 //! struct Data(String);
 //!
 //! async fn client(addr: SocketAddrV4) -> io::Result<()> {
-//!     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+//!     let rdma = Rdma::connect(addr, 1, 1, 64).await?;
 //!     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
 //!     let mut rmr = rdma.request_remote_mr(Layout::new::<Data>()).await?;
 //!     // then send this mr to server to make server aware of this mr.
@@ -43,7 +43,7 @@
 //! #[tokio::main]
 //! async fn server(addr: SocketAddrV4) -> io::Result<()> {
 //!     let rdma_listener = RdmaListener::bind(addr).await?;
-//!     let rdma = rdma_listener.accept(1, 1, 512).await?;
+//!     let rdma = rdma_listener.accept(1, 1, 64).await?;
 //!     let lmr = rdma.receive_local_mr().await?;
 //!     // print the content of lmr, which was `write` by client
 //!     unsafe { println!("{}", &*(*(lmr.as_ptr() as *const Data)).0) };
@@ -378,7 +378,7 @@ impl Rdma {
     fn qp_handshake(&mut self, remote: QueuePairEndpoint) -> io::Result<()> {
         self.qp.modify_to_rtr(remote, 0, 1, 0x12)?;
         debug!("rtr");
-        self.qp.modify_to_rts(0x12, 6, 7, 0, 1)?;
+        self.qp.modify_to_rts(0x12, 6, 6, 0, 1)?;
         debug!("rts");
         Ok(())
     }
@@ -402,7 +402,7 @@ impl Rdma {
     /// struct Data(String);
     ///
     /// async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+    ///     let rdma = Rdma::connect(addr, 1, 1, 64).await?;
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     // put data into lmr
     ///     unsafe { *(lmr.as_mut_ptr() as *mut Data) = Data("hello world".to_string()) };
@@ -414,7 +414,7 @@ impl Rdma {
     /// #[tokio::main]
     /// async fn server(addr: SocketAddrV4) -> io::Result<()> {
     ///     let rdma_listener = RdmaListener::bind(addr).await?;
-    ///     let rdma = rdma_listener.accept(1, 1, 512).await?;
+    ///     let rdma = rdma_listener.accept(1, 1, 64).await?;
     ///     // receive the data sent by client and put it into an mr
     ///     let lmr = rdma.receive().await?;
     ///     // read data from mr
@@ -461,36 +461,22 @@ impl Rdma {
     /// static MSG: &str = "hello world";
     ///
     /// async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+    ///     let rdma = Rdma::connect(addr, 1, 1, 64).await?;
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     // put data into lmr
     ///     unsafe { std::ptr::write(lmr.as_mut_ptr() as *mut Data, Data(MSG.to_string())) };
     ///     // send the content of lmr to server
     ///     rdma.send_with_imm(&lmr, IMM_NUM).await?;
-    ///     rdma.send_with_imm(&lmr, IMM_NUM).await?;
-    ///     rdma.send(&lmr).await?;
-    ///     rdma.send(&lmr).await?;
     ///     Ok(())
     /// }
     ///
     /// #[tokio::main]
     /// async fn server(addr: SocketAddrV4) -> io::Result<()> {
     ///     let rdma_listener = RdmaListener::bind(addr).await?;
-    ///     let rdma = rdma_listener.accept(1, 1, 512).await?;
+    ///     let rdma = rdma_listener.accept(1, 1, 64).await?;
     ///     // receive the data and imm sent by the client
     ///     let (lmr, imm) = rdma.receive_with_imm().await?;
     ///     assert_eq!(imm, Some(IMM_NUM));
-    ///     unsafe { assert_eq!(MSG.to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
-    ///     // receive the data in mr while avoiding the immediate data is ok.
-    ///     let lmr = rdma.receive().await?;
-    ///     unsafe { assert_eq!(MSG.to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
-    ///     // `receive_with_imm` works well even if the client didn't send any immediate data.
-    ///     // the imm received will be a `None`.
-    ///     let (lmr, imm) = rdma.receive_with_imm().await?;
-    ///     assert_eq!(imm, None);
-    ///     unsafe { assert_eq!(MSG.to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
-    ///     // compared to the above, using `receive` is a better choice.
-    ///     let lmr = rdma.receive().await?;
     ///     unsafe { assert_eq!(MSG.to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
     ///     // wait for the agent thread to send all reponses to the remote.
     ///     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -535,7 +521,7 @@ impl Rdma {
     /// struct Data(String);
     ///
     /// async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+    ///     let rdma = Rdma::connect(addr, 1, 1, 64).await?;
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     // put data into lmr
     ///     unsafe { *(lmr.as_mut_ptr() as *mut Data) = Data("hello world".to_string()) };
@@ -547,7 +533,7 @@ impl Rdma {
     /// #[tokio::main]
     /// async fn server(addr: SocketAddrV4) -> io::Result<()> {
     ///     let rdma_listener = RdmaListener::bind(addr).await?;
-    ///     let rdma = rdma_listener.accept(1, 1, 512).await?;
+    ///     let rdma = rdma_listener.accept(1, 1, 64).await?;
     ///     // receive the data sent by client and put it into an mr
     ///     let lmr = rdma.receive().await?;
     ///     // read data from mr
@@ -591,36 +577,22 @@ impl Rdma {
     /// static MSG: &str = "hello world";
     ///
     /// async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+    ///     let rdma = Rdma::connect(addr, 1, 1, 64).await?;
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     // put data into lmr
     ///     unsafe { std::ptr::write(lmr.as_mut_ptr() as *mut Data, Data(MSG.to_string())) };
     ///     // send the content of lmr to server
     ///     rdma.send_with_imm(&lmr, IMM_NUM).await?;
-    ///     rdma.send_with_imm(&lmr, IMM_NUM).await?;
-    ///     rdma.send(&lmr).await?;
-    ///     rdma.send(&lmr).await?;
     ///     Ok(())
     /// }
     ///
     /// #[tokio::main]
     /// async fn server(addr: SocketAddrV4) -> io::Result<()> {
     ///     let rdma_listener = RdmaListener::bind(addr).await?;
-    ///     let rdma = rdma_listener.accept(1, 1, 512).await?;
+    ///     let rdma = rdma_listener.accept(1, 1, 64).await?;
     ///     // receive the data and imm sent by the client
     ///     let (lmr, imm) = rdma.receive_with_imm().await?;
     ///     assert_eq!(imm, Some(IMM_NUM));
-    ///     unsafe { assert_eq!(MSG.to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
-    ///     // receive the data in mr while avoiding the immediate data is ok.
-    ///     let lmr = rdma.receive().await?;
-    ///     unsafe { assert_eq!(MSG.to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
-    ///     // `receive_with_imm` works well even if the client didn't send any immediate data.
-    ///     // the imm received will be a `None`.
-    ///     let (lmr, imm) = rdma.receive_with_imm().await?;
-    ///     assert_eq!(imm, None);
-    ///     unsafe { assert_eq!(MSG.to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
-    ///     // compared to the above, using `receive` is a better choice.
-    ///     let lmr = rdma.receive().await?;
     ///     unsafe { assert_eq!(MSG.to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
     ///     // wait for the agent thread to send all reponses to the remote.
     ///     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -669,7 +641,7 @@ impl Rdma {
     /// static MSG: &str = "hello world";
     ///
     /// async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+    ///     let rdma = Rdma::connect(addr, 1, 1, 64).await?;
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     let mut rmr = rdma.request_remote_mr(Layout::new::<Data>()).await?;
     ///     let data = Data(MSG.to_string());
@@ -677,6 +649,7 @@ impl Rdma {
     ///     // send the content of lmr to server with immediate data.
     ///     rdma.write_with_imm(&lmr, &mut rmr, IMM_NUM).await?;
     ///     // then send this mr to server to make server aware of this mr.
+    ///     tokio::time::sleep(Duration::from_millis(100)).await;
     ///     rdma.send_remote_mr(rmr).await?;
     ///     Ok(())
     /// }
@@ -684,7 +657,7 @@ impl Rdma {
     /// #[tokio::main]
     /// async fn server(addr: SocketAddrV4) -> io::Result<()> {
     ///     let rdma_listener = RdmaListener::bind(addr).await?;
-    ///     let rdma = rdma_listener.accept(1, 1, 512).await?;
+    ///     let rdma = rdma_listener.accept(1, 1, 64).await?;
     ///     // receive the immediate data sent by `write_with_imm`
     ///     let imm = rdma.receive_write_imm().await?;
     ///     assert_eq!(imm, IMM_NUM);
@@ -734,7 +707,7 @@ impl Rdma {
     /// struct Data(String);
     ///
     /// async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+    ///     let rdma = Rdma::connect(addr, 1, 1, 64).await?;
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     // put data into lmr
     ///     unsafe { *(lmr.as_mut_ptr() as *mut Data) = Data("hello world".to_string()) };
@@ -746,7 +719,7 @@ impl Rdma {
     /// #[tokio::main]
     /// async fn server(addr: SocketAddrV4) -> io::Result<()> {
     ///     let rdma_listener = RdmaListener::bind(addr).await?;
-    ///     let rdma = rdma_listener.accept(1, 1, 512).await?;
+    ///     let rdma = rdma_listener.accept(1, 1, 64).await?;
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     // receive the data sent by client and put it into an mr
     ///     let rmr = rdma.receive_remote_mr().await?;
@@ -792,7 +765,7 @@ impl Rdma {
     /// struct Data(String);
     ///
     /// async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+    ///     let rdma = Rdma::connect(addr, 1, 1, 64).await?;
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     let mut rmr = rdma.request_remote_mr(Layout::new::<Data>()).await?;
     ///     // then send this mr to server to make server aware of this mr.
@@ -806,7 +779,7 @@ impl Rdma {
     /// #[tokio::main]
     /// async fn server(addr: SocketAddrV4) -> io::Result<()> {
     ///     let rdma_listener = RdmaListener::bind(addr).await?;
-    ///     let rdma = rdma_listener.accept(1, 1, 512).await?;
+    ///     let rdma = rdma_listener.accept(1, 1, 64).await?;
     ///     let lmr = rdma.receive_local_mr().await?;
     ///     // print the content of lmr, which was `write` by client
     ///     unsafe { assert_eq!("hello world".to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
@@ -853,13 +826,14 @@ impl Rdma {
     /// static MSG: &str = "hello world";
     ///
     /// async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+    ///     let rdma = Rdma::connect(addr, 1, 1, 64).await?;
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     let mut rmr = rdma.request_remote_mr(Layout::new::<Data>()).await?;
     ///     let data = Data(MSG.to_string());
     ///     unsafe { *(lmr.as_mut_ptr() as *mut Data) = data };
     ///     // send the content of lmr to server with immediate data.
     ///     rdma.write_with_imm(&lmr, &mut rmr, IMM_NUM).await?;
+    ///     tokio::time::sleep(Duration::from_millis(100)).await;
     ///     // then send this mr to server to make server aware of this mr.
     ///     rdma.send_remote_mr(rmr).await?;
     ///     Ok(())
@@ -868,7 +842,7 @@ impl Rdma {
     /// #[tokio::main]
     /// async fn server(addr: SocketAddrV4) -> io::Result<()> {
     ///     let rdma_listener = RdmaListener::bind(addr).await?;
-    ///     let rdma = rdma_listener.accept(1, 1, 512).await?;
+    ///     let rdma = rdma_listener.accept(1, 1, 64).await?;
     ///     // receive the immediate data sent by `write_with_imm`
     ///     let imm = rdma.receive_write_imm().await?;
     ///     assert_eq!(imm, IMM_NUM);
@@ -913,14 +887,14 @@ impl Rdma {
     /// use portpicker::pick_unused_port;
     ///
     /// async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+    ///     let rdma = Rdma::connect(addr, 1, 1, 64).await?;
     ///     Ok(())
     /// }
     ///
     /// #[tokio::main]
     /// async fn server(addr: SocketAddrV4) -> io::Result<()> {
     ///     let rdma_listener = RdmaListener::bind(addr).await?;
-    ///     let rdma = rdma_listener.accept(1, 1, 512).await?;
+    ///     let rdma = rdma_listener.accept(1, 1, 64).await?;
     ///     println!("connected");
     ///     Ok(())
     /// }
@@ -987,7 +961,7 @@ impl Rdma {
     /// struct Data(String);
     ///
     /// async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+    ///     let rdma = Rdma::connect(addr, 1, 1, 64).await?;
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     // put data into lmr
     ///     unsafe { *(lmr.as_mut_ptr() as *mut Data) = Data("hello world".to_string()) };
@@ -999,7 +973,7 @@ impl Rdma {
     /// #[tokio::main]
     /// async fn server(addr: SocketAddrV4) -> io::Result<()> {
     ///     let rdma_listener = RdmaListener::bind(addr).await?;
-    ///     let rdma = rdma_listener.accept(1, 1, 512).await?;
+    ///     let rdma = rdma_listener.accept(1, 1, 64).await?;
     ///     // receive the data sent by client and put it into an mr
     ///     let lmr = rdma.receive().await?;
     ///     // read data from mr
@@ -1038,7 +1012,7 @@ impl Rdma {
     /// struct Data(String);
     ///
     /// async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+    ///     let rdma = Rdma::connect(addr, 1, 1, 64).await?;
     ///     // request a mr located in server.
     ///     let rmr = rdma.request_remote_mr(Layout::new::<Data>()).await?;
     ///     // do something with rmr like `write` data into it.
@@ -1050,7 +1024,7 @@ impl Rdma {
     /// #[tokio::main]
     /// async fn server(addr: SocketAddrV4) -> io::Result<()> {
     ///     let rdma_listener = RdmaListener::bind(addr).await?;
-    ///     let rdma = rdma_listener.accept(1, 1, 512).await?;
+    ///     let rdma = rdma_listener.accept(1, 1, 64).await?;
     ///     // receive the mr which was requested by client.
     ///     let lmr = rdma.receive_local_mr().await?;
     ///     // do something with lmr like getting data from it.
@@ -1096,7 +1070,7 @@ impl Rdma {
     /// struct Data(String);
     ///
     /// async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+    ///     let rdma = Rdma::connect(addr, 1, 1, 64).await?;
     ///     // request a mr located in server.
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     // do something with rmr like `write` data into it.
@@ -1108,7 +1082,7 @@ impl Rdma {
     /// #[tokio::main]
     /// async fn server(addr: SocketAddrV4) -> io::Result<()> {
     ///     let rdma_listener = RdmaListener::bind(addr).await?;
-    ///     let rdma = rdma_listener.accept(1, 1, 512).await?;
+    ///     let rdma = rdma_listener.accept(1, 1, 64).await?;
     ///     // receive the mr which was requested by client.
     ///     let rmr = rdma.receive_remote_mr().await?;
     ///     // do something with lmr like getting data from it.
@@ -1156,7 +1130,7 @@ impl Rdma {
     /// struct Data(String);
     ///
     /// async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+    ///     let rdma = Rdma::connect(addr, 1, 1, 64).await?;
     ///     // request a mr located in server.
     ///     let rmr = rdma.request_remote_mr(Layout::new::<Data>()).await?;
     ///     // do something with rmr like `write` data into it.
@@ -1168,7 +1142,7 @@ impl Rdma {
     /// #[tokio::main]
     /// async fn server(addr: SocketAddrV4) -> io::Result<()> {
     ///     let rdma_listener = RdmaListener::bind(addr).await?;
-    ///     let rdma = rdma_listener.accept(1, 1, 512).await?;
+    ///     let rdma = rdma_listener.accept(1, 1, 64).await?;
     ///     // receive the mr which was requested by client.
     ///     let lmr = rdma.receive_local_mr().await?;
     ///     // do something with lmr like getting data from it.
@@ -1223,7 +1197,7 @@ impl Rdma {
     /// struct Data(String);
     ///
     /// async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+    ///     let rdma = Rdma::connect(addr, 1, 1, 64).await?;
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     let mut rmr = rdma.request_remote_mr(Layout::new::<Data>()).await?;
     ///     // then send this mr to server to make server aware of this mr.
@@ -1237,7 +1211,7 @@ impl Rdma {
     /// #[tokio::main]
     /// async fn server(addr: SocketAddrV4) -> io::Result<()> {
     ///     let rdma_listener = RdmaListener::bind(addr).await?;
-    ///     let rdma = rdma_listener.accept(1, 1, 512).await?;
+    ///     let rdma = rdma_listener.accept(1, 1, 64).await?;
     ///     let lmr = rdma.receive_local_mr().await?;
     ///     // print the content of lmr, which was `write` by client
     ///     unsafe { assert_eq!("hello world".to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
@@ -1283,7 +1257,7 @@ impl Rdma {
     /// struct Data(String);
     ///
     /// async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
+    ///     let rdma = Rdma::connect(addr, 1, 1, 64).await?;
     ///     // receive an mr located in server.
     ///     let rmr = rdma.receive_remote_mr().await?;
     ///     // do something with rmr like `read` data from it.
@@ -1293,7 +1267,7 @@ impl Rdma {
     /// #[tokio::main]
     /// async fn server(addr: SocketAddrV4) -> io::Result<()> {
     ///     let rdma_listener = RdmaListener::bind(addr).await?;
-    ///     let rdma = rdma_listener.accept(1, 1, 512).await?;
+    ///     let rdma = rdma_listener.accept(1, 1, 64).await?;
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     // do something with lmr like put data into it.
     ///     // send this lmr to client

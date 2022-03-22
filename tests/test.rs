@@ -71,7 +71,7 @@ mod test2 {
     async fn server(rdma: Rdma) -> io::Result<()> {
         let rdma = Arc::new(rdma);
         let mut handles = vec![];
-        for _ in 0..10 {
+        for _ in 0..3 {
             let rdma_clone = rdma.clone();
             handles.push(tokio::spawn(async move {
                 let lm = rdma_clone.receive().await.unwrap();

@@ -33,7 +33,7 @@ impl Server {
             .map_err(|err| println!("{}", err))
             .unwrap();
         // wait for client to connect
-        let rdma = Arc::new(rdmalistener.accept(1, 1, 128).await.unwrap());
+        let rdma = Arc::new(rdmalistener.accept(1, 1, 64).await.unwrap());
         // run rpc task loop
         let sr_handler = tokio::spawn(Self::sr_task(rdma.clone()));
         let wr_handler = tokio::spawn(Self::wr_task(rdma));
@@ -144,7 +144,7 @@ impl Client {
     async fn new<A: ToSocketAddrs>(addr: A) -> Self {
         // connect to server
         // gid_index: 0:ipv6 1:ipv4(default)
-        let rdma_stub = Rdma::connect(addr, 1, 1, 128)
+        let rdma_stub = Rdma::connect(addr, 1, 1, 64)
             .await
             .map_err(|err| println!("{}", &err))
             .unwrap();

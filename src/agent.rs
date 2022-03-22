@@ -33,7 +33,7 @@ use tokio::{
 use tracing::{debug, trace};
 
 /// Maximum time for waiting for a response
-static RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+static RESPONSE_TIMEOUT: Duration = Duration::from_secs(10);
 /// An agent for handling the dirty rdma request and async events
 #[derive(Debug)]
 pub(crate) struct Agent {

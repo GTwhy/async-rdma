@@ -8,7 +8,7 @@ mod local_mr_slice {
     use crate::*;
     async fn server(addr: SocketAddrV4) {
         let rdmalistener = RdmaListener::bind(addr).await.unwrap();
-        let rdma = rdmalistener.accept(1, 1, 128).await.unwrap();
+        let rdma = rdmalistener.accept(1, 1, 64).await.unwrap();
         const LEN: usize = 4096;
         let mut lmr = rdma.alloc_local_mr(Layout::new::<[u8; LEN]>()).unwrap();
         assert_eq!(lmr.length(), LEN);
@@ -35,7 +35,7 @@ mod local_mr_slice {
     }
 
     async fn client(addr: SocketAddrV4) {
-        let _rdma = Rdma::connect(addr, 1, 1, 512).await.unwrap();
+        let _rdma = Rdma::connect(addr, 1, 1, 64).await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -51,7 +51,7 @@ mod local_mr_slice_overbound {
         use crate::*;
         async fn server(addr: SocketAddrV4) {
             let rdmalistener = RdmaListener::bind(addr).await.unwrap();
-            let rdma = rdmalistener.accept(1, 1, 128).await.unwrap();
+            let rdma = rdmalistener.accept(1, 1, 64).await.unwrap();
             const LEN: usize = 4096;
             let lmr = rdma.alloc_local_mr(Layout::new::<[u8; LEN]>()).unwrap();
             assert_eq!(lmr.length(), LEN);
@@ -60,7 +60,7 @@ mod local_mr_slice_overbound {
         }
 
         async fn client(addr: SocketAddrV4) {
-            let _rdma = Rdma::connect(addr, 1, 1, 512).await.unwrap();
+            let _rdma = Rdma::connect(addr, 1, 1, 64).await.unwrap();
         }
 
         // #[tokio::test] has a default single-threaded test runtime that may cause a dead lock.
@@ -76,7 +76,7 @@ mod local_mr_slice_overbound {
         use crate::*;
         async fn server(addr: SocketAddrV4) {
             let rdmalistener = RdmaListener::bind(addr).await.unwrap();
-            let rdma = rdmalistener.accept(1, 1, 128).await.unwrap();
+            let rdma = rdmalistener.accept(1, 1, 64).await.unwrap();
             const LEN: usize = 4096;
             let lmr = rdma.alloc_local_mr(Layout::new::<[u8; LEN]>()).unwrap();
             assert_eq!(lmr.length(), LEN);
@@ -84,7 +84,7 @@ mod local_mr_slice_overbound {
         }
 
         async fn client(addr: SocketAddrV4) {
-            let _rdma = Rdma::connect(addr, 1, 1, 512).await.unwrap();
+            let _rdma = Rdma::connect(addr, 1, 1, 64).await.unwrap();
         }
 
         // #[tokio::test] has a default single-threaded test runtime that may cause a dead lock.
@@ -100,7 +100,7 @@ mod local_mr_slice_overbound {
         use crate::*;
         async fn server(addr: SocketAddrV4) {
             let rdmalistener = RdmaListener::bind(addr).await.unwrap();
-            let rdma = rdmalistener.accept(1, 1, 128).await.unwrap();
+            let rdma = rdmalistener.accept(1, 1, 64).await.unwrap();
             const LEN: usize = 4096;
             let lmr = rdma.alloc_local_mr(Layout::new::<[u8; LEN]>()).unwrap();
             assert_eq!(lmr.length(), LEN);
@@ -108,7 +108,7 @@ mod local_mr_slice_overbound {
         }
 
         async fn client(addr: SocketAddrV4) {
-            let _rdma = Rdma::connect(addr, 1, 1, 512).await.unwrap();
+            let _rdma = Rdma::connect(addr, 1, 1, 64).await.unwrap();
         }
 
         // #[tokio::test] has a default single-threaded test runtime that may cause a dead lock.
@@ -126,13 +126,13 @@ mod remote_mr_slice {
     const LEN: usize = 4096;
     async fn server(addr: SocketAddrV4) {
         let rdmalistener = RdmaListener::bind(addr).await.unwrap();
-        let rdma = rdmalistener.accept(1, 1, 128).await.unwrap();
+        let rdma = rdmalistener.accept(1, 1, 64).await.unwrap();
         let lmr = rdma.alloc_local_mr(Layout::new::<[u8; LEN]>()).unwrap();
         rdma.send_local_mr(lmr).await.unwrap();
     }
 
     async fn client(addr: SocketAddrV4) {
-        let rdma = Rdma::connect(addr, 1, 1, 512).await.unwrap();
+        let rdma = Rdma::connect(addr, 1, 1, 64).await.unwrap();
         let rmr = rdma.receive_remote_mr().await.unwrap();
         assert_eq!(rmr.length(), LEN);
         let s1 = rmr.get(0..LEN).unwrap();
@@ -169,13 +169,13 @@ mod remote_mr_slice_overbound {
         const LEN: usize = 4096;
         async fn server(addr: SocketAddrV4) {
             let rdmalistener = RdmaListener::bind(addr).await.unwrap();
-            let rdma = rdmalistener.accept(1, 1, 128).await.unwrap();
+            let rdma = rdmalistener.accept(1, 1, 64).await.unwrap();
             let lmr = rdma.alloc_local_mr(Layout::new::<[u8; LEN]>()).unwrap();
             rdma.send_local_mr(lmr).await.unwrap();
         }
 
         async fn client(addr: SocketAddrV4) {
-            let rdma = Rdma::connect(addr, 1, 1, 512).await.unwrap();
+            let rdma = Rdma::connect(addr, 1, 1, 64).await.unwrap();
             let rmr = rdma.receive_remote_mr().await.unwrap();
             assert_eq!(rmr.length(), LEN);
             #[allow(clippy::reversed_empty_ranges)]
@@ -196,13 +196,13 @@ mod remote_mr_slice_overbound {
         const LEN: usize = 4096;
         async fn server(addr: SocketAddrV4) {
             let rdmalistener = RdmaListener::bind(addr).await.unwrap();
-            let rdma = rdmalistener.accept(1, 1, 128).await.unwrap();
+            let rdma = rdmalistener.accept(1, 1, 64).await.unwrap();
             let lmr = rdma.alloc_local_mr(Layout::new::<[u8; LEN]>()).unwrap();
             rdma.send_local_mr(lmr).await.unwrap();
         }
 
         async fn client(addr: SocketAddrV4) {
-            let rdma = Rdma::connect(addr, 1, 1, 512).await.unwrap();
+            let rdma = Rdma::connect(addr, 1, 1, 64).await.unwrap();
             let rmr = rdma.receive_remote_mr().await.unwrap();
             assert_eq!(rmr.length(), LEN);
             let _s1 = rmr.get(0..0).unwrap();
@@ -222,13 +222,13 @@ mod remote_mr_slice_overbound {
         const LEN: usize = 4096;
         async fn server(addr: SocketAddrV4) {
             let rdmalistener = RdmaListener::bind(addr).await.unwrap();
-            let rdma = rdmalistener.accept(1, 1, 128).await.unwrap();
+            let rdma = rdmalistener.accept(1, 1, 64).await.unwrap();
             let lmr = rdma.alloc_local_mr(Layout::new::<[u8; LEN]>()).unwrap();
             rdma.send_local_mr(lmr).await.unwrap();
         }
 
         async fn client(addr: SocketAddrV4) {
-            let rdma = Rdma::connect(addr, 1, 1, 512).await.unwrap();
+            let rdma = Rdma::connect(addr, 1, 1, 64).await.unwrap();
             let rmr = rdma.receive_remote_mr().await.unwrap();
             assert_eq!(rmr.length(), LEN);
             let _s1 = rmr.get(0..LEN + 1).unwrap();

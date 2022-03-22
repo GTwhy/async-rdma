@@ -10,7 +10,7 @@
 //!     cargo run --example client
 
 use async_rdma::{LocalMrWriteAccess, Rdma};
-use std::alloc::Layout;
+use std::{alloc::Layout, time::Duration};
 use tracing::debug;
 
 async fn send_lmr_to_server(rdma: &Rdma) {
@@ -37,9 +37,17 @@ async fn send_data_to_server(rdma: &Rdma) {
 async fn main() {
     tracing_subscriber::fmt::init();
     debug!("client start");
-    let rdma = Rdma::connect("127.0.0.1:5555", 1, 1, 512).await.unwrap();
+    let rdma = Rdma::connect("127.0.0.1:5555", 1, 1, 64).await.unwrap();
     send_lmr_to_server(&rdma).await;
+    // `send` is faster than `receive` because the workflow of `receive` operation is
+    // more complex. If we run server and client in the same machine like this test and
+    // `send` without `sleep`, the receiver will be too busy to response sender.
+    // So the sender's RDMA netdev will retry again and again which make the situation worse.
+    // You can skip this `sleep` if your receiver's machine is fast enough.
+    tokio::time::sleep(Duration::from_millis(100)).await;
     request_then_write(&rdma).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
     send_data_to_server(&rdma).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
     debug!("client done");
 }

@@ -10,7 +10,7 @@
 //!     cargo run --example client
 
 use async_rdma::{LocalMrReadAccess, Rdma, RdmaListener};
-use std::alloc::Layout;
+use std::{alloc::Layout, time::Duration};
 use tracing::debug;
 
 async fn read_rmr_from_client(rdma: &Rdma) {
@@ -35,10 +35,12 @@ async fn main() {
     tracing_subscriber::fmt::init();
     debug!("server start");
     let rdmalistener = RdmaListener::bind("127.0.0.1:5555").await.unwrap();
-    let rdma = rdmalistener.accept(1, 1, 128).await.unwrap();
+    let rdma = rdmalistener.accept(1, 1, 64).await.unwrap();
     debug!("accepted");
     read_rmr_from_client(&rdma).await;
     receive_after_being_written(&rdma).await;
     receive_data_from_client(&rdma).await;
+    // wait for the agent thread to send all reponses to the remote.
+    tokio::time::sleep(Duration::from_secs(3)).await;
     debug!("server done");
 }

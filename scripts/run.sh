@@ -55,13 +55,25 @@ sudo rdma link add $RXE_DEV type rxe netdev $ETH_DEV
 rdma link | grep $RXE_DEV
 
 # Cargo run async-rdma
-cargo build
-RUST_LOG=debug cargo run --example loop
-cargo test
-timeout 3 target/debug/examples/server &
-sleep 1
-target/debug/examples/client
-sleep 1
+# prlimit --memlock=555 cargo build
+# prlimit --memlock=555 cargo run --example loop || sudo dmesg
+# prlimit --memlock=555 cargo test || sudo dmesg
+# ln -s /home/runner/.cargo  ~/
+# ln -s /home/runner/.rustup  ~/
+# ln -s /home/runner/.cargo/bin  ~/
+
+sudo env "PATH=$PATH" bash -c "
+    ulimit -l unlimited &&
+    rustup default 1.57.0 && 
+    cargo build
+    cargo run --example loop || sudo dmesg
+    cargo test || sudo dmesg
+    timeout 3 target/debug/examples/server &
+    sleep 1
+    target/debug/examples/client
+    sleep 1
+"
+
 
 # Test soft-roce
 ibv_rc_pingpong -d $RXE_DEV -g 0 &

@@ -3,10 +3,12 @@ use crate::{
     protection_domain::ProtectionDomain,
     LocalMrReadAccess,
 };
+use clippy_utilities::OverflowArithmetic;
 use libc::{c_void, size_t};
 use lockfree_cuckoohash::{pin, LockFreeCuckooHash};
 use num_traits::ToPrimitive;
 use rdma_sys::ibv_access_flags;
+use std::collections::BTreeMap;
 use std::mem;
 use std::sync::Mutex;
 use std::{alloc::Layout, io, ptr, sync::Arc};
@@ -56,7 +58,7 @@ lazy_static! {
     static ref ORIGIN_HOOKS: extent_hooks_t = get_default_hooks_impl(DEFAULT_ARENA_INDEX).unwrap();
     /// The correspondence between extent metadata and `raw_mr`
     #[derive(Debug)]
-    pub(crate) static ref EXTENT_TOKEN_MAP: Arc<Mutex<Vec<Item>>> = Arc::new(Mutex::new(Vec::<Item>::new()));
+    pub(crate) static ref EXTENT_TOKEN_MAP: Arc<Mutex<BTreeMap<usize, Item>>> = Arc::new(Mutex::new(BTreeMap::<usize, Item>::new()));
     /// The correspondence between `arena_ind` and `ProtectionDomain`
     pub(crate) static ref ARENA_PD_MAP: Arc<LockFreeCuckooHash<u32, Arc<ProtectionDomain>>> = Arc::new(LockFreeCuckooHash::new());
 }
@@ -90,7 +92,7 @@ impl MrAllocator {
     /// Allocate a MR according to the `layout`
     pub(crate) fn alloc(self: &Arc<Self>, layout: &Layout) -> io::Result<LocalMr> {
         let addr = self.alloc_from_je(layout) as usize;
-        let raw_mr = lookup_raw_mr(addr).unwrap();
+        let raw_mr = self.lookup_raw_mr(addr).unwrap();
         Ok(LocalMr::new(addr, layout.size(), raw_mr))
     }
 
@@ -107,19 +109,27 @@ impl MrAllocator {
         assert_ne!(addr, ptr::null_mut());
         addr as *mut u8
     }
-}
 
-/// Look up `raw_mr` info by addr
-/// TODO: Need to optimize
-fn lookup_raw_mr(addr: usize) -> Option<Arc<RawMemoryRegion>> {
-    for item in EXTENT_TOKEN_MAP.lock().unwrap().iter() {
-        if addr >= item.addr && addr < item.addr + item.len {
-            debug!("LOOK addr {}, item {:?}", addr, item);
-            return Some(item.raw_mr.clone());
+    /// Look up `raw_mr` info by addr
+    fn lookup_raw_mr(&self, addr: usize) -> Option<Arc<RawMemoryRegion>> {
+        match EXTENT_TOKEN_MAP
+            .lock()
+            .unwrap()
+            .range(..addr.overflow_add(1))
+            .next_back()
+        {
+            Some((_, item)) => {
+                debug!("LOOK addr {}, item {:?}", addr, item);
+                assert_eq!(self.arena_ind, item._arena_ind);
+                assert!(addr >= item.addr && addr < item.addr + item.len);
+                Some(item.raw_mr.clone())
+            }
+            None => {
+                error!("can not find raw mr by addr {}", addr);
+                None
+            }
         }
     }
-    error!("can not find raw mr by addr {}", addr);
-    None
 }
 
 /// Get default extent hooks of jemalloc
@@ -268,8 +278,12 @@ unsafe extern "C" fn extent_alloc_hook(
         _arena_ind: arena_ind,
     };
     debug!("ALLOC item {:?} lkey {}", &item, item.raw_mr.lkey());
-    EXTENT_TOKEN_MAP.as_ref().lock().unwrap().push(item);
-    addr
+    match EXTENT_TOKEN_MAP.lock().unwrap().insert(item.addr, item) {
+        Some(_) => {
+            panic!("alloc the same addr double time");
+        }
+        None => addr,
+    }
 }
 
 unsafe extern "C" fn extent_dalloc_hook(

@@ -7,7 +7,7 @@ use rdma_sys::{ibv_access_flags, ibv_dereg_mr, ibv_mr, ibv_reg_mr};
 use std::fmt::Debug;
 use std::io;
 use std::{ptr::NonNull, sync::Arc};
-use tracing::error;
+use tracing::{debug, error};
 
 /// Raw Memory Region
 pub(crate) struct RawMemoryRegion {
@@ -83,7 +83,7 @@ unsafe impl Send for RawMemoryRegion {}
 
 impl Drop for RawMemoryRegion {
     fn drop(&mut self) {
-        println!("dereg_mr {:?}", &self);
+        debug!("dereg_mr {:?}", &self);
         let errno = unsafe { ibv_dereg_mr(self.inner_mr.as_ptr()) };
         unsafe { tikv_jemalloc_sys::free(self.addr as *mut c_void) };
         assert_eq!(errno, 0_i32);

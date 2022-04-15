@@ -30,7 +30,7 @@ use tokio::{
     sync::mpsc,
     time::{sleep, Sleep},
 };
-use tracing::error;
+use tracing::{debug, error};
 
 /// Maximum value of `send_wr`
 pub(crate) static MAX_SEND_WR: u32 = 10;
@@ -312,7 +312,7 @@ impl QueuePair {
         let mut sr = SendWr::new_send(lms, wr_id, imm);
         self.event_listener.cq.req_notify(false)?;
         for lm in lms {
-            println!(
+            debug!(
                 "POST_SEND addr {}, len {}, lkey {} wrid: {}",
                 lm.addr(),
                 lm.length(),
@@ -340,8 +340,8 @@ impl QueuePair {
         let mut bad_wr = std::ptr::null_mut::<ibv_recv_wr>();
         self.event_listener.cq.req_notify(false)?;
         for lm in lms {
-            println!(
-                "POST_SEND addr {}, len {}, lkey {} wrid: {}",
+            debug!(
+                "POST_RECV addr {}, len {}, lkey {} wrid: {}",
                 lm.addr(),
                 lm.length(),
                 lm.lkey(),
@@ -369,7 +369,7 @@ impl QueuePair {
         let mut sr = SendWr::new_read(lms, wr_id, rm);
         self.event_listener.cq.req_notify(false)?;
         for lm in lms {
-            println!(
+            debug!(
                 "POST_SEND addr {}, len {}, lkey {} wrid: {}",
                 lm.addr(),
                 lm.length(),
@@ -404,8 +404,8 @@ impl QueuePair {
         let mut sr = SendWr::new_write(lms, wr_id, rm, imm);
         self.event_listener.cq.req_notify(false)?;
         for lm in lms {
-            println!("```````````````````````````````````````");
-            println!(
+            debug!("```````````````````````````````````````");
+            debug!(
                 "POST_SEND addr {}, len {}, lkey {} wrid: {}",
                 lm.addr(),
                 lm.length(),

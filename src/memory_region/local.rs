@@ -1,4 +1,5 @@
 use clippy_utilities::OverflowArithmetic;
+use tracing::debug;
 
 use super::{raw::RawMemoryRegion, MrAccess};
 use std::{fmt::Debug, io, ops::Range, slice, sync::Arc};
@@ -53,7 +54,7 @@ pub struct LocalMr {
 
 impl Drop for LocalMr {
     fn drop(&mut self) {
-        println!("DROP LocalMr {:?}", self);
+        debug!("DROP LocalMr {:?}", self);
         unsafe { tikv_jemalloc_sys::free(self.origin_addr as _) }
     }
 }

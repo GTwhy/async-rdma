@@ -4,22 +4,17 @@ use crate::{
     LocalMrReadAccess,
 };
 use libc::{c_void, size_t};
+use lockfree_cuckoohash::{pin, LockFreeCuckooHash};
 use num_traits::ToPrimitive;
 use rdma_sys::ibv_access_flags;
 use std::mem;
 use std::sync::Mutex;
 use std::{alloc::Layout, io, ptr, sync::Arc};
 use tikv_jemalloc_sys::{self, extent_hooks_t, MALLOCX_ALIGN, MALLOCX_ARENA};
-use tracing::error;
+use tracing::{debug, error};
 
 /// Get default extent hooks from arena0
 static DEFAULT_ARENA_INDEX: u32 = 0;
-
-/// Get mr from this arena
-static mut MR_ARENA_INDEX: u32 = 0;
-
-/// Used by custom hooks to register memory region
-static mut DEFAULT_PD: Option<Arc<ProtectionDomain>> = None;
 
 /// Custom extent alloc hook used by jemalloc
 /// Alloc extent memory with `ibv_reg_mr()`
@@ -60,7 +55,10 @@ lazy_static! {
     /// Default extent hooks of jemalloc
     static ref ORIGIN_HOOKS: extent_hooks_t = get_default_hooks_impl(DEFAULT_ARENA_INDEX).unwrap();
     /// The correspondence between extent metadata and `raw_mr`
-    static ref EXTENT_TOKEN_MAP: Arc<Mutex<Vec<Item>>> = Arc::new(Mutex::new(Vec::<Item>::new()));
+    #[derive(Debug)]
+    pub(crate) static ref EXTENT_TOKEN_MAP: Arc<Mutex<Vec<Item>>> = Arc::new(Mutex::new(Vec::<Item>::new()));
+    /// The correspondence between `arena_ind` and `ProtectionDomain`
+    pub(crate) static ref ARENA_PD_MAP: Arc<LockFreeCuckooHash<u32, Arc<ProtectionDomain>>> = Arc::new(LockFreeCuckooHash::new());
 }
 
 /// Combination between extent metadata and `raw_mr`
@@ -69,6 +67,7 @@ pub(crate) struct Item {
     addr: usize,
     len: usize,
     raw_mr: Arc<RawMemoryRegion>,
+    _arena_ind: u32,
 }
 
 /// Memory region allocator
@@ -76,21 +75,37 @@ pub(crate) struct Item {
 pub(crate) struct MrAllocator {
     /// Protection domain that holds the allocator
     _pd: Arc<ProtectionDomain>,
+    /// Arena index
+    arena_ind: u32,
 }
 
 impl MrAllocator {
     /// Create a new MR allocator
     pub(crate) fn new(pd: Arc<ProtectionDomain>) -> Self {
         get_je_stats();
-        init_je_statics(pd.clone()).unwrap();
-        Self { _pd: pd }
+        let arena_ind = init_je_statics(pd.clone()).unwrap();
+        Self { _pd: pd, arena_ind }
     }
 
     /// Allocate a MR according to the `layout`
     pub(crate) fn alloc(self: &Arc<Self>, layout: &Layout) -> io::Result<LocalMr> {
-        let addr = alloc_from_je(layout) as usize;
+        let addr = self.alloc_from_je(layout) as usize;
         let raw_mr = lookup_raw_mr(addr).unwrap();
         Ok(LocalMr::new(addr, layout.size(), raw_mr))
+    }
+
+    /// Alloc memory for RDMA operations from jemalloc
+    fn alloc_from_je(&self, layout: &Layout) -> *mut u8 {
+        let addr = unsafe {
+            tikv_jemalloc_sys::mallocx(
+                layout.size(),
+                (MALLOCX_ALIGN(layout.align()) | MALLOCX_ARENA(self.arena_ind.to_usize().unwrap()))
+                    .to_i32()
+                    .unwrap(),
+            )
+        };
+        assert_ne!(addr, ptr::null_mut());
+        addr as *mut u8
     }
 }
 
@@ -99,26 +114,12 @@ impl MrAllocator {
 fn lookup_raw_mr(addr: usize) -> Option<Arc<RawMemoryRegion>> {
     for item in EXTENT_TOKEN_MAP.lock().unwrap().iter() {
         if addr >= item.addr && addr < item.addr + item.len {
-            println!("LOOK addr {}, item {:?}", addr, item);
+            debug!("LOOK addr {}, item {:?}", addr, item);
             return Some(item.raw_mr.clone());
         }
     }
     error!("can not find raw mr by addr {}", addr);
     None
-}
-
-/// Alloc memory for RDMA operations from jemalloc
-fn alloc_from_je(layout: &Layout) -> *mut u8 {
-    let addr = unsafe {
-        tikv_jemalloc_sys::mallocx(
-            layout.size(),
-            (MALLOCX_ALIGN(layout.align()) | MALLOCX_ARENA(MR_ARENA_INDEX.to_usize().unwrap()))
-                .to_i32()
-                .unwrap(),
-        )
-    };
-    assert_ne!(addr, ptr::null_mut());
-    addr as *mut u8
 }
 
 /// Get default extent hooks of jemalloc
@@ -161,7 +162,7 @@ fn set_extent_hooks(arena_ind: u32) -> io::Result<()> {
             hooks_len,
         )
     };
-    println!("arena<{}> set hooks success", arena_ind);
+    debug!("arena<{}> set hooks success", arena_ind);
     if errno != 0_i32 {
         error!("set extent hooks failed");
         return Err(io::Error::from_raw_os_error(errno));
@@ -188,8 +189,21 @@ fn create_arena() -> io::Result<u32> {
         error!("set extent hooks failed");
         return Err(io::Error::from_raw_os_error(errno));
     }
-    println!("create arena success aid : {}", aid);
+    debug!("create arena success aid : {}", aid);
     Ok(aid)
+}
+
+/// Create arena and init statics
+fn init_je_statics(pd: Arc<ProtectionDomain>) -> io::Result<u32> {
+    let ind = create_arena()?;
+    if ARENA_PD_MAP.insert(ind, pd) {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            "insert ARENA_PD_MAP failed",
+        ));
+    }
+    set_extent_hooks(ind)?;
+    Ok(ind)
 }
 
 /// Get stats of je
@@ -211,16 +225,7 @@ fn get_je_stats() {
     if errno != 0_i32 {
         error!("can not get je");
     }
-    println!("allocated {}", allocated);
-}
-
-/// Create arena and init statics
-fn init_je_statics(pd: Arc<ProtectionDomain>) -> io::Result<()> {
-    unsafe { DEFAULT_PD = Some(pd) }
-    let ind = create_arena()?;
-    unsafe { MR_ARENA_INDEX = ind };
-    set_extent_hooks(ind)?;
-    Ok(())
+    debug!("allocated {}", allocated);
 }
 
 unsafe extern "C" fn extent_alloc_hook(
@@ -249,7 +254,7 @@ unsafe extern "C" fn extent_alloc_hook(
         | ibv_access_flags::IBV_ACCESS_REMOTE_ATOMIC;
     let raw_mr = Arc::new(
         RawMemoryRegion::register_from_pd(
-            &DEFAULT_PD.clone().unwrap(),
+            ARENA_PD_MAP.get(&arena_ind, &pin()).unwrap(),
             addr as *mut u8,
             size,
             access,
@@ -260,8 +265,9 @@ unsafe extern "C" fn extent_alloc_hook(
         addr: addr as usize,
         len: size,
         raw_mr,
+        _arena_ind: arena_ind,
     };
-    println!("ALLOC item {:?} lkey {}", &item, item.raw_mr.lkey());
+    debug!("ALLOC item {:?} lkey {}", &item, item.raw_mr.lkey());
     EXTENT_TOKEN_MAP.as_ref().lock().unwrap().push(item);
     addr
 }
@@ -273,7 +279,7 @@ unsafe extern "C" fn extent_dalloc_hook(
     committed: i32,
     arena_ind: u32,
 ) -> i32 {
-    println!("DALLOC addr {}, size{}", addr as usize, size);
+    debug!("DALLOC addr {}, size{}", addr as usize, size);
     // todo!("remove item from EXTENT_TOKEN_MAP");
     let origin_dalloc = (*ORIGIN_HOOKS).dalloc.unwrap();
     origin_dalloc(extent_hooks, addr, size, committed, arena_ind)
@@ -309,7 +315,7 @@ mod tests {
         let allocator = Arc::new(MrAllocator::new(pd));
         let layout = Layout::new::<char>();
         let lmr = allocator.alloc(&layout)?;
-        println!("lmr info :{:?}", &lmr);
+        debug!("lmr info :{:?}", &lmr);
         Ok(())
     }
 
@@ -317,35 +323,34 @@ mod tests {
     fn je_malloxc_test() {
         let ctx = Arc::new(Context::open(None, 1, 1).unwrap());
         let pd = Arc::new(ctx.create_protection_domain().unwrap());
-        init_je_statics(pd.clone()).unwrap();
+        let ind = init_je_statics(pd.clone()).unwrap();
         let thread = thread::spawn(move || {
             let layout = Layout::new::<char>();
             let addr = unsafe {
                 tikv_jemalloc_sys::mallocx(
                     layout.size(),
-                    MALLOCX_ALIGN(layout.align())
-                        | MALLOCX_ARENA(MR_ARENA_INDEX.to_usize().unwrap()),
+                    MALLOCX_ALIGN(layout.align()) | MALLOCX_ARENA(ind.to_usize().unwrap()),
                 )
             };
             assert_ne!(addr, ptr::null_mut());
             unsafe {
                 *(addr as *mut char) = 'c';
                 assert_eq!(*(addr as *mut char), 'c');
-                println!("addr : {}, char : {}", addr as usize, *(addr as *mut char));
+                debug!("addr : {}, char : {}", addr as usize, *(addr as *mut char));
             }
         });
         let layout = Layout::new::<char>();
         let addr = unsafe {
             tikv_jemalloc_sys::mallocx(
                 layout.size(),
-                MALLOCX_ALIGN(layout.align()) | MALLOCX_ARENA(MR_ARENA_INDEX.to_usize().unwrap()),
+                MALLOCX_ALIGN(layout.align()) | MALLOCX_ARENA(ind.to_usize().unwrap()),
             )
         };
         assert_ne!(addr, ptr::null_mut());
         unsafe {
             *(addr as *mut char) = 'c';
             assert_eq!(*(addr as *mut char), 'c');
-            println!("addr : {}, char : {}", addr as usize, *(addr as *mut char));
+            debug!("addr : {}, char : {}", addr as usize, *(addr as *mut char));
         }
         thread.join().unwrap();
     }

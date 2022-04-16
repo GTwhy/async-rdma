@@ -286,7 +286,7 @@ unsafe extern "C" fn extent_dalloc_hook(
     committed: i32,
     arena_ind: u32,
 ) -> i32 {
-    debug!("DALLOC addr {}, size{}", addr as usize, size);
+    debug!("DALLOC addr {}, size {}", addr as usize, size);
     let _ = EXTENT_TOKEN_MAP
         .lock()
         .unwrap()
@@ -305,6 +305,10 @@ unsafe extern "C" fn extent_merge_hook(
     committed: i32,
     arena_ind: u32,
 ) -> i32 {
+    debug!(
+        "MERGE addr_a {}, size_a {}; addr_b {}, size_b {}",
+        addr_a as usize, size_a, addr_b as usize, size_b
+    );
     let origin_merge = (*ORIGIN_HOOKS).merge.unwrap();
     let err = origin_merge(
         extent_hooks,
@@ -314,10 +318,6 @@ unsafe extern "C" fn extent_merge_hook(
         size_b,
         committed,
         arena_ind,
-    );
-    debug!(
-        "MERGE addr_a {}, size_a {}; addr_b {}, size_b {} err {}",
-        addr_a as usize, size_a, addr_b as usize, size_b, err
     );
     if err != 0 {
         return 1_i32;
@@ -376,6 +376,7 @@ pub(crate) fn register_extent_mr(
     access: ibv_access_flags,
 ) -> Item {
     assert_ne!(addr, ptr::null_mut());
+    debug!("reg_mr addr {}, size {}, arena_ind {}, access {:?}", addr as usize, size, arena_ind, access);
     let raw_mr = Arc::new(
         RawMemoryRegion::register_from_pd(
             ARENA_PD_MAP.get(&arena_ind, &pin()).unwrap(),
@@ -407,8 +408,7 @@ mod tests {
             .set_gid_index(1)
             .build()?;
         let mut mrs = vec![];
-        //Layout::new::<[u8; 4096]>()
-        let layout = Layout::new::<char>();
+        let layout = Layout::new::<[u8; 4096]>();
         for _ in 0_i32..2_i32 {
             let mr = rdma.alloc_local_mr(layout)?;
             mrs.push(mr);
@@ -424,6 +424,32 @@ mod tests {
         let layout = Layout::new::<char>();
         let lmr = allocator.alloc(&layout)?;
         debug!("lmr info :{:?}", &lmr);
+        Ok(())
+    }
+
+
+    #[test]
+    fn test_extent_hooks() -> io::Result<()> {
+        tracing_subscriber::fmt::init();
+        let ctx = Arc::new(Context::open(None, 1, 1)?);
+        let pd = Arc::new(ctx.create_protection_domain()?);
+        let allocator = Arc::new(MrAllocator::new(pd));
+        let layout = Layout::new::<char>();
+        // alloc and drop one by one
+        for _ in 0_u32..100u32 {
+            let _lmr = allocator.alloc(&layout)?;
+        }
+        // alloc all and drop all
+        let layout = Layout::new::<[u8; 16*1024]>();
+        let mut lmrs = vec![];
+        for _ in 0_u32..100u32 {
+            lmrs.push(allocator.alloc(&layout)?);
+        }
+        // jemalloc will merge extents after drop all lmr in lmrs.
+        lmrs.clear();
+        // alloc big extent and dalloc it immediately after _lmr's dropping
+        let layout = Layout::new::<[u8; 1024*1024*32]>();
+        let _lmr = allocator.alloc(&layout)?;
         Ok(())
     }
 

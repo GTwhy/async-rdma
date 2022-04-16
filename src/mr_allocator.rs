@@ -40,6 +40,18 @@ static RDMA_DALLOC_EXTENT_HOOK: unsafe extern "C" fn(
     arena_ind: u32,
 ) -> i32 = extent_dalloc_hook;
 
+/// Custom extent merge hook used by jemalloc
+/// Merge two adjacent extents to a bigger one
+static RDMA_MERGE_EXTENT_HOOK: unsafe extern "C" fn(
+    extent_hooks: *mut extent_hooks_t,
+    addr_a: *mut c_void,
+    size_a: usize,
+    addr_b: *mut c_void,
+    size_b: usize,
+    committed: i32,
+    arena_ind: u32,
+) -> i32 = extent_merge_hook;
+
 /// Custom extent hooks
 static mut RDMA_EXTENT_HOOKS: extent_hooks_t = extent_hooks_t {
     alloc: Some(RDMA_ALLOC_EXTENT_HOOK),
@@ -50,7 +62,7 @@ static mut RDMA_EXTENT_HOOKS: extent_hooks_t = extent_hooks_t {
     purge_lazy: None,
     purge_forced: None,
     split: None,
-    merge: None,
+    merge: Some(RDMA_MERGE_EXTENT_HOOK),
 };
 
 lazy_static! {
@@ -257,26 +269,7 @@ unsafe extern "C" fn extent_alloc_hook(
         commit,
         arena_ind,
     );
-    assert_ne!(addr, ptr::null_mut());
-    let access = ibv_access_flags::IBV_ACCESS_LOCAL_WRITE
-        | ibv_access_flags::IBV_ACCESS_REMOTE_WRITE
-        | ibv_access_flags::IBV_ACCESS_REMOTE_READ
-        | ibv_access_flags::IBV_ACCESS_REMOTE_ATOMIC;
-    let raw_mr = Arc::new(
-        RawMemoryRegion::register_from_pd(
-            ARENA_PD_MAP.get(&arena_ind, &pin()).unwrap(),
-            addr as *mut u8,
-            size,
-            access,
-        )
-        .unwrap(),
-    );
-    let item = Item {
-        addr: addr as usize,
-        len: size,
-        raw_mr,
-        _arena_ind: arena_ind,
-    };
+    let item = register_extent_mr_default(addr, size, arena_ind);
     debug!("ALLOC item {:?} lkey {}", &item, item.raw_mr.lkey());
     match EXTENT_TOKEN_MAP.lock().unwrap().insert(item.addr, item) {
         Some(_) => {
@@ -294,9 +287,110 @@ unsafe extern "C" fn extent_dalloc_hook(
     arena_ind: u32,
 ) -> i32 {
     debug!("DALLOC addr {}, size{}", addr as usize, size);
-    // todo!("remove item from EXTENT_TOKEN_MAP");
+    let _ = EXTENT_TOKEN_MAP
+        .lock()
+        .unwrap()
+        .remove(&(addr as _))
+        .unwrap();
     let origin_dalloc = (*ORIGIN_HOOKS).dalloc.unwrap();
     origin_dalloc(extent_hooks, addr, size, committed, arena_ind)
+}
+
+unsafe extern "C" fn extent_merge_hook(
+    extent_hooks: *mut extent_hooks_t,
+    addr_a: *mut c_void,
+    size_a: usize,
+    addr_b: *mut c_void,
+    size_b: usize,
+    committed: i32,
+    arena_ind: u32,
+) -> i32 {
+    let origin_merge = (*ORIGIN_HOOKS).merge.unwrap();
+    let err = origin_merge(
+        extent_hooks,
+        addr_a,
+        size_a,
+        addr_b,
+        size_b,
+        committed,
+        arena_ind,
+    );
+    debug!(
+        "MERGE addr_a {}, size_a {}; addr_b {}, size_b {} err {}",
+        addr_a as usize, size_a, addr_b as usize, size_b, err
+    );
+    if err != 0 {
+        return 1_i32;
+    }
+    let arena_a = EXTENT_TOKEN_MAP
+        .lock()
+        .unwrap()
+        .get(&(addr_a as usize))
+        .unwrap()
+        ._arena_ind;
+    let arena_b = EXTENT_TOKEN_MAP
+        .lock()
+        .unwrap()
+        .get(&(addr_b as usize))
+        .unwrap()
+        ._arena_ind;
+    // make sure the extents belong to the same pd(arena).
+    if arena_a != arena_b {
+        return 1_i32;
+    }
+    let _ = EXTENT_TOKEN_MAP
+        .lock()
+        .unwrap()
+        .remove(&(addr_a as _))
+        .unwrap();
+    let _ = EXTENT_TOKEN_MAP
+        .lock()
+        .unwrap()
+        .remove(&(addr_b as _))
+        .unwrap();
+    // the old mrs will deregister after `raw_mr` dorp
+    // so we only need to register a new `raw_mr`
+    let item = register_extent_mr_default(addr_a, size_a.overflow_add(size_b), arena_ind);
+    match EXTENT_TOKEN_MAP.lock().unwrap().insert(item.addr, item) {
+        Some(_) => {
+            panic!("alloc the same addr double time");
+        }
+        None => 0_i32,
+    }
+}
+
+/// Register extent memory region with default access flags
+pub(crate) fn register_extent_mr_default(addr: *mut c_void, size: usize, arena_ind: u32) -> Item {
+    let access = ibv_access_flags::IBV_ACCESS_LOCAL_WRITE
+        | ibv_access_flags::IBV_ACCESS_REMOTE_WRITE
+        | ibv_access_flags::IBV_ACCESS_REMOTE_READ
+        | ibv_access_flags::IBV_ACCESS_REMOTE_ATOMIC;
+    register_extent_mr(addr, size, arena_ind, access)
+}
+
+/// Register extent memory region
+pub(crate) fn register_extent_mr(
+    addr: *mut c_void,
+    size: usize,
+    arena_ind: u32,
+    access: ibv_access_flags,
+) -> Item {
+    assert_ne!(addr, ptr::null_mut());
+    let raw_mr = Arc::new(
+        RawMemoryRegion::register_from_pd(
+            ARENA_PD_MAP.get(&arena_ind, &pin()).unwrap(),
+            addr as *mut u8,
+            size,
+            access,
+        )
+        .unwrap(),
+    );
+    Item {
+        addr: addr as usize,
+        len: size,
+        raw_mr,
+        _arena_ind: arena_ind,
+    }
 }
 
 #[cfg(test)]

@@ -53,6 +53,8 @@ pub struct LocalMr {
 }
 
 impl Drop for LocalMr {
+    #[inline]
+    #[allow(clippy::as_conversions)]
     fn drop(&mut self) {
         debug!("DROP LocalMr {:?}", self);
         unsafe { tikv_jemalloc_sys::free(self.origin_addr as _) }

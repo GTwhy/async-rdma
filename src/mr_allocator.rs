@@ -1,7 +1,9 @@
 use crate::{
-    memory_region::{local::LocalMr, RawMemoryRegion},
+    memory_region::{
+        local::{LocalMr, LocalMrInner},
+        RawMemoryRegion,
+    },
     protection_domain::ProtectionDomain,
-    LocalMrReadAccess,
 };
 use clippy_utilities::{Cast, OverflowArithmetic};
 use libc::{c_void, size_t};
@@ -105,15 +107,22 @@ impl MrAllocator {
         Self { _pd: pd, arena_ind }
     }
 
-    /// Allocate a MR according to the `layout`
+    /// Allocate a `LocalMr` according to the `layout`
     #[allow(clippy::as_conversions)]
     pub(crate) fn alloc(self: &Arc<Self>, layout: &Layout) -> io::Result<LocalMr> {
+        let inner = Arc::new(self.alloc_inner(layout)?);
+        Ok(LocalMr::new(inner))
+    }
+
+    /// Allocate a `LocalMrInner` according to the `layout`
+    #[allow(clippy::as_conversions)]
+    pub(crate) fn alloc_inner(self: &Arc<Self>, layout: &Layout) -> io::Result<LocalMrInner> {
         self.alloc_from_je(layout).map_or_else(||{
-            Err(io::Error::new(io::ErrorKind::OutOfMemory, "insufficient contiguous memory was available to service the allocation request"))
-        }, |addr|{
-            let raw_mr = self.lookup_raw_mr(addr as usize);
-            Ok(LocalMr::new(addr as usize, layout.size(), raw_mr))
-        })
+                Err(io::Error::new(io::ErrorKind::OutOfMemory, "insufficient contiguous memory was available to service the allocation request"))
+            }, |addr|{
+                let raw_mr = self.lookup_raw_mr(addr as usize);
+                Ok(LocalMrInner::new(addr as usize, layout.size(), raw_mr))
+            })
     }
 
     /// Alloc memory for RDMA operations from jemalloc
@@ -561,7 +570,6 @@ mod tests {
         );
         let item = lookup_raw_mr(arena_ind, addr as usize).unwrap();
         assert_eq!(item.addr(), addr as usize);
-        assert_eq!(item.as_ptr(), addr as *const u8);
         assert_eq!(item.length(), size);
         addr
     }
@@ -606,7 +614,6 @@ mod tests {
         );
         let item = lookup_raw_mr(arena_ind, addr_a as usize).unwrap();
         assert_eq!(item.addr(), addr_a as usize);
-        assert_eq!(item.as_ptr(), addr_a as *const u8);
         assert_eq!(item.length(), size_a.overflow_add(size_b));
         res
     }

@@ -21,7 +21,11 @@ pub trait LocalMrReadAccess: MrAccess {
 
     /// Get the local key
     fn lkey(&self) -> u32;
+
+    /// Get the corresponding `LocalMrInner`
+    fn get_inner(&self) -> &Arc<LocalMrInner>;
 }
+
 /// Writable local mr trait
 pub trait LocalMrWriteAccess: MrAccess + LocalMrReadAccess {
     /// Get the memory region start mut addr
@@ -42,23 +46,12 @@ pub trait LocalMrWriteAccess: MrAccess + LocalMrReadAccess {
 /// Local Memory Region
 #[derive(Debug)]
 pub struct LocalMr {
-    /// `LocalMr take()` may change `addr`, use `origin_addr` when `free()`
-    origin_addr: usize,
+    /// Local Memory Region Inner
+    inner: Arc<LocalMrInner>,
     /// The start address of this mr
     addr: usize,
-    /// The length of this mr
+    /// the length of this mr
     len: usize,
-    /// The raw mr where this local mr comes from.
-    raw: Arc<RawMemoryRegion>,
-}
-
-impl Drop for LocalMr {
-    #[inline]
-    #[allow(clippy::as_conversions)]
-    fn drop(&mut self) {
-        debug!("drop LocalMr {:?}", self);
-        unsafe { tikv_jemalloc_sys::free(self.origin_addr as _) }
-    }
 }
 
 impl MrAccess for LocalMr {
@@ -74,14 +67,19 @@ impl MrAccess for LocalMr {
 
     #[inline]
     fn rkey(&self) -> u32 {
-        self.raw.lkey()
+        self.inner.rkey()
     }
 }
 
 impl LocalMrReadAccess for LocalMr {
     #[inline]
     fn lkey(&self) -> u32 {
-        self.raw.lkey()
+        self.inner.lkey()
+    }
+
+    #[inline]
+    fn get_inner(&self) -> &Arc<LocalMrInner> {
+        &self.inner
     }
 }
 
@@ -89,12 +87,11 @@ impl LocalMrWriteAccess for LocalMr {}
 
 impl LocalMr {
     /// New Local Mr
-    pub(crate) fn new(addr: usize, len: usize, raw: Arc<RawMemoryRegion>) -> Self {
+    pub(crate) fn new(inner: Arc<LocalMrInner>) -> Self {
         Self {
-            origin_addr: addr,
-            addr,
-            len,
-            raw,
+            addr: inner.addr,
+            len: inner.len,
+            inner,
         }
     }
 
@@ -102,11 +99,12 @@ impl LocalMr {
     #[inline]
     pub fn get(&self, i: Range<usize>) -> io::Result<LocalMrSlice> {
         // SAFETY: `self` is checked to be valid and in bounds above.
-        if i.start >= i.end || i.end > self.length() {
+        if i.start >= i.end || i.end > self.len {
             Err(io::Error::new(io::ErrorKind::Other, "wrong range of lmr"))
         } else {
             Ok(LocalMrSlice::new(
                 self,
+                Arc::<LocalMrInner>::clone(&self.inner),
                 self.addr().overflow_add(i.start),
                 i.len(),
             ))
@@ -122,6 +120,7 @@ impl LocalMr {
         } else {
             Ok(LocalMrSliceMut::new(
                 self,
+                Arc::<LocalMrInner>::clone(&self.inner),
                 self.addr().overflow_add(i.start),
                 i.len(),
             ))
@@ -142,6 +141,55 @@ impl LocalMr {
     }
 }
 
+/// Local Memory Region inner
+#[derive(Debug)]
+pub struct LocalMrInner {
+    /// The start address of this mr
+    addr: usize,
+    /// The length of this mr
+    len: usize,
+    /// The raw mr where this local mr comes from.
+    raw: Arc<RawMemoryRegion>,
+}
+
+impl Drop for LocalMrInner {
+    #[inline]
+    #[allow(clippy::as_conversions)]
+    fn drop(&mut self) {
+        debug!("drop LocalMr {:?}", self);
+        unsafe { tikv_jemalloc_sys::free(self.addr as _) }
+    }
+}
+
+impl MrAccess for LocalMrInner {
+    #[inline]
+    fn addr(&self) -> usize {
+        self.addr
+    }
+
+    #[inline]
+    fn length(&self) -> usize {
+        self.len
+    }
+
+    #[inline]
+    fn rkey(&self) -> u32 {
+        self.raw.lkey()
+    }
+}
+
+impl LocalMrInner {
+    /// New Local Mr
+    pub(crate) fn new(addr: usize, len: usize, raw: Arc<RawMemoryRegion>) -> Self {
+        Self { addr, len, raw }
+    }
+
+    /// Get local key of memory region
+    fn lkey(&self) -> u32 {
+        self.raw.lkey()
+    }
+}
+
 impl MrAccess for &LocalMr {
     #[inline]
     fn addr(&self) -> usize {
@@ -155,14 +203,19 @@ impl MrAccess for &LocalMr {
 
     #[inline]
     fn rkey(&self) -> u32 {
-        self.raw.rkey()
+        self.inner.rkey()
     }
 }
 
 impl LocalMrReadAccess for &LocalMr {
     #[inline]
     fn lkey(&self) -> u32 {
-        self.raw.lkey()
+        self.inner.lkey()
+    }
+
+    #[inline]
+    fn get_inner(&self) -> &Arc<LocalMrInner> {
+        &self.inner
     }
 }
 
@@ -171,6 +224,8 @@ impl LocalMrReadAccess for &LocalMr {
 pub struct LocalMrSlice<'a> {
     /// The local mr where this local mr slice comes from.
     lmr: &'a LocalMr,
+    /// The local mr where this local mr slice comes from.
+    inner: Arc<LocalMrInner>,
     /// The start address of this mr
     addr: usize,
     /// the length of this mr
@@ -198,12 +253,22 @@ impl LocalMrReadAccess for LocalMrSlice<'_> {
     fn lkey(&self) -> u32 {
         self.lmr.lkey()
     }
+
+    #[inline]
+    fn get_inner(&self) -> &Arc<LocalMrInner> {
+        &self.inner
+    }
 }
 
 impl<'a> LocalMrSlice<'a> {
     /// New a local mr slice.
-    pub(crate) fn new(lmr: &'a LocalMr, addr: usize, len: usize) -> Self {
-        Self { lmr, addr, len }
+    pub(crate) fn new(lmr: &'a LocalMr, inner: Arc<LocalMrInner>, addr: usize, len: usize) -> Self {
+        Self {
+            lmr,
+            inner,
+            addr,
+            len,
+        }
     }
 }
 
@@ -212,6 +277,8 @@ impl<'a> LocalMrSlice<'a> {
 pub struct LocalMrSliceMut<'a> {
     /// The local mr where this local mr slice comes from.
     lmr: &'a mut LocalMr,
+    /// The local mr where this local mr slice comes from.
+    inner: Arc<LocalMrInner>,
     /// The start address of this mr
     addr: usize,
     /// the length of this mr
@@ -220,8 +287,18 @@ pub struct LocalMrSliceMut<'a> {
 
 impl<'a> LocalMrSliceMut<'a> {
     /// New a mutable local mr slice.
-    pub(crate) fn new(lmr: &'a mut LocalMr, addr: usize, len: usize) -> Self {
-        Self { lmr, addr, len }
+    pub(crate) fn new(
+        lmr: &'a mut LocalMr,
+        inner: Arc<LocalMrInner>,
+        addr: usize,
+        len: usize,
+    ) -> Self {
+        Self {
+            lmr,
+            inner,
+            addr,
+            len,
+        }
     }
 }
 
@@ -245,6 +322,11 @@ impl MrAccess for LocalMrSliceMut<'_> {
 impl LocalMrReadAccess for LocalMrSliceMut<'_> {
     fn lkey(&self) -> u32 {
         self.lmr.lkey()
+    }
+
+    #[inline]
+    fn get_inner(&self) -> &Arc<LocalMrInner> {
+        &self.inner
     }
 }
 

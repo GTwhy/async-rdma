@@ -1,9 +1,9 @@
 use crate::{
     completion_queue::{WCError, WorkCompletion, WorkRequestId},
-    event_listener::EventListener,
+    event_listener::{EventListener, LmrInners},
     gid::Gid,
     memory_region::{
-        local::{LocalMrReadAccess, LocalMrWriteAccess},
+        local::{LocalMrInner, LocalMrReadAccess, LocalMrWriteAccess},
         remote::{RemoteMrReadAccess, RemoteMrWriteAccess},
     },
     protection_domain::ProtectionDomain,
@@ -433,7 +433,7 @@ impl QueuePair {
         LR: LocalMrReadAccess,
     {
         let send = QPSend::new(lms, imm);
-        QueuePairOps::new(Arc::<Self>::clone(self), send)
+        QueuePairOps::new(Arc::<Self>::clone(self), send, get_lmr_inners(lms))
     }
 
     /// receive data to a local memory region
@@ -445,7 +445,7 @@ impl QueuePair {
         LW: LocalMrWriteAccess,
     {
         let recv = QPRecv::new(lms);
-        QueuePairOps::new(Arc::<Self>::clone(self), recv)
+        QueuePairOps::new(Arc::<Self>::clone(self), recv, get_mut_lmr_inners(lms))
     }
 
     /// read data from `rm` to `lms`
@@ -454,7 +454,7 @@ impl QueuePair {
         LW: LocalMrWriteAccess,
         RR: RemoteMrReadAccess,
     {
-        let (wr_id, mut resp_rx) = self.event_listener.register();
+        let (wr_id, mut resp_rx) = self.event_listener.register(&get_mut_lmr_inners(lms));
         let len: usize = lms.iter().map(|lm| lm.length()).sum();
         self.submit_read(lms, rm, wr_id)?;
         resp_rx
@@ -477,7 +477,7 @@ impl QueuePair {
         LR: LocalMrReadAccess,
         RW: RemoteMrWriteAccess,
     {
-        let (wr_id, mut resp_rx) = self.event_listener.register();
+        let (wr_id, mut resp_rx) = self.event_listener.register(&get_lmr_inners(lms));
         let len: usize = lms.iter().map(|lm| lm.length()).sum();
         self.submit_write(lms, rm, wr_id, imm)?;
         resp_rx
@@ -530,6 +530,27 @@ impl Drop for QueuePair {
         let errno = unsafe { ibv_destroy_qp(self.as_ptr()) };
         assert_eq!(errno, 0_i32);
     }
+}
+
+/// Get `LmrInners` corresponding to the lms that going to be
+/// used by RDMA ops
+fn get_lmr_inners<LR>(lms: &[&LR]) -> LmrInners
+where
+    LR: LocalMrReadAccess,
+{
+    lms.iter()
+        .map(|lm| Arc::<LocalMrInner>::clone(lm.get_inner()))
+        .collect()
+}
+
+/// Get `LmrInners` corresponding to the mutable lms that going to be
+/// used by RDMA ops
+fn get_mut_lmr_inners<LR>(lms: &[&mut LR]) -> LmrInners
+where
+    LR: LocalMrReadAccess,
+{
+    let imlms: Vec<&LR> = lms.iter().map(|lm| &**lm).collect();
+    get_lmr_inners(&imlms)
 }
 
 /// Queue pair op resubmit delay, default is 1 sec
@@ -642,7 +663,7 @@ where
 #[derive(Debug)]
 enum QueuePairOpsState {
     /// It's in init state, not yet submitted
-    Init,
+    Init(LmrInners),
     /// Submit
     Submit(WorkRequestId, Option<mpsc::Receiver<WorkCompletion>>),
     /// Sleep and prepare to resubmit
@@ -668,10 +689,10 @@ pub(crate) struct QueuePairOps<Op: QueuePairOp + Unpin> {
 
 impl<Op: QueuePairOp + Unpin> QueuePairOps<Op> {
     /// Create a new queue pair operation wrapper
-    fn new(qp: Arc<QueuePair>, op: Op) -> Self {
+    fn new(qp: Arc<QueuePair>, op: Op, inners: LmrInners) -> Self {
         Self {
             qp,
-            state: QueuePairOpsState::Init,
+            state: QueuePairOpsState::Init(inners),
             op,
         }
     }
@@ -683,8 +704,8 @@ impl<Op: QueuePairOp + Unpin> Future for QueuePairOps<Op> {
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let s = self.get_mut();
         match s.state {
-            QueuePairOpsState::Init => {
-                let (wr_id, recv) = s.qp.event_listener.register();
+            QueuePairOpsState::Init(ref inners) => {
+                let (wr_id, recv) = s.qp.event_listener.register(inners);
                 s.state = QueuePairOpsState::Submit(wr_id, Some(recv));
                 Pin::new(s).poll(cx)
             }

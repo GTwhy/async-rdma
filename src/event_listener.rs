@@ -1,4 +1,7 @@
-use crate::completion_queue::{CompletionQueue, WorkCompletion, WorkRequestId};
+use crate::{
+    completion_queue::{CompletionQueue, WorkCompletion, WorkRequestId},
+    memory_region::local::LocalMrInner,
+};
 use lockfree_cuckoohash::{pin, LockFreeCuckooHash};
 use std::{sync::Arc, time::Duration};
 use tokio::{
@@ -13,8 +16,11 @@ use tracing::{error, warn};
 /// the command response back to the requester.
 type Responder = Sender<WorkCompletion>;
 
+/// `Arc`s of `LocalMrInner`s that are being used by RDMA ops
+pub(crate) type LmrInners = Vec<Arc<LocalMrInner>>;
+
 /// Map holding the Request Id to `Responder`
-type ReqMap = Arc<LockFreeCuckooHash<WorkRequestId, Responder>>;
+type ReqMap = Arc<LockFreeCuckooHash<WorkRequestId, (Responder, LmrInners)>>;
 
 /// Event listener timeout, default is 1 sec
 static EVENT_LISTENER_TIMEOUT: Duration = Duration::from_secs(1);
@@ -34,7 +40,8 @@ impl EventListener {
     /// Create a `EventListner`
     pub(crate) fn new(cq: Arc<CompletionQueue>) -> EventListener {
         let req_map = Arc::new(LockFreeCuckooHash::new());
-        let req_map_move = Arc::<LockFreeCuckooHash<WorkRequestId, Responder>>::clone(&req_map);
+        let req_map_move =
+            Arc::<LockFreeCuckooHash<WorkRequestId, (Responder, LmrInners)>>::clone(&req_map);
         Self {
             req_map,
             _poller_handle: Self::start(Arc::<CompletionQueue>::clone(&cq), req_map_move),
@@ -66,8 +73,12 @@ impl EventListener {
                     }
                 }
                 while let Ok(wc) = cq.poll_single() {
-                    if let Some(resp) = req_map.remove_with_guard(&wc.wr_id(), &pin()) {
-                        resp
+                    if let Some(v) = req_map.remove_with_guard(&wc.wr_id(), &pin()) {
+                        // unlock mrs and enable them to be reused
+                        for inner in &v.1 {
+                            inner.unlock();
+                        }
+                        v.0.clone()
                     } else {
                         error!(
                             "Failed to get the responser for the request {:?}",
@@ -91,14 +102,18 @@ impl EventListener {
         })
     }
 
-    /// Register a new work request id
-    pub(crate) fn register(&self) -> (WorkRequestId, Receiver<WorkCompletion>) {
+    /// Register a new work request id and hold the `LocalMrInner`s to prevent mrs from being
+    /// droped before the RDMA operations done.
+    pub(crate) fn register(
+        &self,
+        inners: &[Arc<LocalMrInner>],
+    ) -> (WorkRequestId, Receiver<WorkCompletion>) {
         let (tx, rx) = channel(2);
         let mut wr_id = WorkRequestId::new();
-        loop {
-            if self.req_map.insert_if_not_exists(wr_id, tx.clone()) {
-                break;
-            }
+        while !self
+            .req_map
+            .insert_if_not_exists(wr_id, (tx.clone(), inners.to_owned()))
+        {
             wr_id = WorkRequestId::new();
         }
         (wr_id, rx)

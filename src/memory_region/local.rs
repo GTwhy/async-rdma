@@ -22,6 +22,18 @@ pub trait LocalMrReadAccess: MrAccess {
         MappedRwLockReadGuard::new(self.get_inner().read(), self.addr() as *const u8)
     }
 
+    /// Try to get the start pointer
+    ///
+    /// Return `None` if this mr is being used in RDMA ops without blocking thread
+    #[allow(clippy::as_conversions)]
+    #[inline]
+    fn try_as_ptr(&self) -> Option<MappedRwLockReadGuard<*const u8>> {
+        self.get_inner().try_read().map_or_else(
+            || None,
+            |guard| return Some(MappedRwLockReadGuard::new(guard, self.addr() as *const u8)),
+        )
+    }
+
     /// Get the start pointer without lock
     ///
     /// # Safety:
@@ -44,6 +56,22 @@ pub trait LocalMrReadAccess: MrAccess {
         MappedRwLockReadGuard::map(self.as_ptr(), |ptr| unsafe {
             slice::from_raw_parts(ptr, self.length())
         })
+    }
+
+    /// Try to get the memory region as slice
+    ///
+    /// Return `None` if this mr is being used in RDMA ops without blocking thread
+    #[allow(clippy::as_conversions)]
+    #[inline]
+    fn try_as_slice(&self) -> Option<MappedRwLockReadGuard<&[u8]>> {
+        self.try_as_ptr().map_or_else(
+            || None,
+            |guard| {
+                return Some(MappedRwLockReadGuard::map(guard, |ptr| unsafe {
+                    slice::from_raw_parts(ptr, self.length())
+                }));
+            },
+        )
     }
 
     /// Get the memory region as slice without lock
@@ -135,6 +163,18 @@ pub trait LocalMrWriteAccess: MrAccess + LocalMrReadAccess {
         MappedRwLockWriteGuard::new(self.get_inner().write(), self.addr() as *mut u8)
     }
 
+    /// Try to get the mutable start pointer
+    ///
+    /// Return `None` if this mr is being used in RDMA ops without blocking thread
+    #[allow(clippy::as_conversions)]
+    #[inline]
+    fn try_as_mut_ptr(&self) -> Option<MappedRwLockWriteGuard<*mut u8>> {
+        self.get_inner().try_write().map_or_else(
+            || None,
+            |guard| return Some(MappedRwLockWriteGuard::new(guard, self.addr() as *mut u8)),
+        )
+    }
+
     /// Get the memory region start mut addr without lock
     ///
     /// # Safety:
@@ -159,6 +199,22 @@ pub trait LocalMrWriteAccess: MrAccess + LocalMrReadAccess {
         MappedRwLockWriteGuard::map(self.as_mut_ptr(), |ptr| unsafe {
             slice::from_raw_parts_mut(ptr, len)
         })
+    }
+
+    /// Try to get the memory region as mutable slice
+    ///
+    /// Return `None` if this mr is being used in RDMA ops without blocking thread
+    #[allow(clippy::as_conversions)]
+    #[inline]
+    fn try_as_mut_slice(&mut self) -> Option<MappedRwLockWriteGuard<&mut [u8]>> {
+        self.try_as_mut_ptr().map_or_else(
+            || None,
+            |guard| {
+                return Some(MappedRwLockWriteGuard::map(guard, |ptr| unsafe {
+                    slice::from_raw_parts_mut(ptr, self.length())
+                }));
+            },
+        )
     }
 
     /// Get the memory region as mut slice without lock

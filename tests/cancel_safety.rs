@@ -1,4 +1,5 @@
 use async_rdma::LocalMrReadAccess;
+use async_rdma::LocalMrWriteAccess;
 use async_rdma::Rdma;
 use std::{alloc::Layout, io, time::Duration};
 mod test_utilities;

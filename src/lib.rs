@@ -37,7 +37,7 @@
 //!     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
 //!     let mut rmr = rdma.request_remote_mr(Layout::new::<Data>()).await?;
 //!     // load data into lmr
-//!     unsafe { *(lmr.as_mut_ptr() as *mut Data) = Data("hello world".to_string()) };
+//!     unsafe { *(*lmr.as_mut_ptr() as *mut Data) = Data("hello world".to_string()) };
 //!     // write the content of local mr into remote mr
 //!     rdma.write(&lmr, &mut rmr).await?;
 //!     // then send rmr's metadata to server to make server aware of it
@@ -52,7 +52,7 @@
 //!     // receive the metadata of the mr sent by client
 //!     let lmr = rdma.receive_local_mr().await?;
 //!     // print the content of lmr, which was `write` by client
-//!     unsafe { println!("{}", &*(*(lmr.as_ptr() as *const Data)).0) };
+//!     unsafe { println!("{}", &*(*(*lmr.as_ptr() as *const Data)).0) };
 //!     // wait for the agent thread to send all reponses to the remote.
 //!     tokio::time::sleep(Duration::from_secs(1)).await;
 //!     Ok(())
@@ -129,8 +129,12 @@ mod event_channel;
 mod event_listener;
 /// Gid for device
 mod gid;
+/// `HashMap` extension
+mod hashmap_extension;
 /// id utils
 mod id;
+/// Lock utilities
+mod lock_utilities;
 /// Memory region abstraction
 mod memory_region;
 /// Memory window abstraction
@@ -420,7 +424,7 @@ impl Rdma {
     ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     // put data into lmr
-    ///     unsafe { *(lmr.as_mut_ptr() as *mut Data) = Data("hello world".to_string()) };
+    ///     unsafe { *(*lmr.as_mut_ptr() as *mut Data) = Data("hello world".to_string()) };
     ///     // send the content of lmr to server
     ///     rdma.send(&lmr).await?;
     ///     Ok(())
@@ -436,7 +440,7 @@ impl Rdma {
     ///     unsafe {
     ///         assert_eq!(
     ///             "hello world".to_string(),
-    ///             *(*(lmr.as_ptr() as *const Data)).0
+    ///             *(*(*lmr.as_ptr() as *const Data)).0
     ///         )
     ///     };
     ///     // wait for the agent thread to send all reponses to the remote.
@@ -486,7 +490,7 @@ impl Rdma {
     ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     // put data into lmr
-    ///     unsafe { std::ptr::write(lmr.as_mut_ptr() as *mut Data, Data(MSG.to_string())) };
+    ///     unsafe { std::ptr::write(*lmr.as_mut_ptr() as *mut Data, Data(MSG.to_string())) };
     ///     // send the content of lmr and imm data to server
     ///     rdma.send_with_imm(&lmr, IMM_NUM).await?;
     ///     rdma.send_with_imm(&lmr, IMM_NUM).await?;
@@ -502,18 +506,18 @@ impl Rdma {
     ///     // receive the data and imm sent by the client
     ///     let (lmr, imm) = rdma.receive_with_imm().await?;
     ///     assert_eq!(imm, Some(IMM_NUM));
-    ///     unsafe { assert_eq!(MSG.to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
+    ///     unsafe { assert_eq!(MSG.to_string(), *(*(*lmr.as_ptr() as *const Data)).0) };
     ///     // receive the data in mr while avoiding the immediate data is ok.
     ///     let lmr = rdma.receive().await?;
-    ///     unsafe { assert_eq!(MSG.to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
+    ///     unsafe { assert_eq!(MSG.to_string(), *(*(*lmr.as_ptr() as *const Data)).0) };
     ///     // `receive_with_imm` works well even if the client didn't send any immediate data.
     ///     // the imm received will be a `None`.
     ///     let (lmr, imm) = rdma.receive_with_imm().await?;
     ///     assert_eq!(imm, None);
-    ///     unsafe { assert_eq!(MSG.to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
+    ///     unsafe { assert_eq!(MSG.to_string(), *(*(*lmr.as_ptr() as *const Data)).0) };
     ///     // compared to the above, using `receive` is a better choice.
     ///     let lmr = rdma.receive().await?;
-    ///     unsafe { assert_eq!(MSG.to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
+    ///     unsafe { assert_eq!(MSG.to_string(), *(*(*lmr.as_ptr() as *const Data)).0) };
     ///     // wait for the agent thread to send all reponses to the remote.
     ///     tokio::time::sleep(Duration::from_secs(1)).await;
     ///     Ok(())
@@ -564,7 +568,7 @@ impl Rdma {
     ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     // put data into lmr
-    ///     unsafe { *(lmr.as_mut_ptr() as *mut Data) = Data("hello world".to_string()) };
+    ///     unsafe { *(*lmr.as_mut_ptr() as *mut Data) = Data("hello world".to_string()) };
     ///     // send the content of lmr to server
     ///     rdma.send(&lmr).await?;
     ///     Ok(())
@@ -580,7 +584,7 @@ impl Rdma {
     ///     unsafe {
     ///         assert_eq!(
     ///             "hello world".to_string(),
-    ///             *(*(lmr.as_ptr() as *const Data)).0
+    ///             *(*(*lmr.as_ptr() as *const Data)).0
     ///         )
     ///     };
     ///     // wait for the agent thread to send all reponses to the remote.
@@ -627,7 +631,7 @@ impl Rdma {
     ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     // put data into lmr
-    ///     unsafe { std::ptr::write(lmr.as_mut_ptr() as *mut Data, Data(MSG.to_string())) };
+    ///     unsafe { std::ptr::write(*lmr.as_mut_ptr() as *mut Data, Data(MSG.to_string())) };
     ///     // send the content of lmr and imm data to server
     ///     rdma.send_with_imm(&lmr, IMM_NUM).await?;
     ///     rdma.send_with_imm(&lmr, IMM_NUM).await?;
@@ -643,18 +647,18 @@ impl Rdma {
     ///     // receive the data and imm sent by the client
     ///     let (lmr, imm) = rdma.receive_with_imm().await?;
     ///     assert_eq!(imm, Some(IMM_NUM));
-    ///     unsafe { assert_eq!(MSG.to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
+    ///     unsafe { assert_eq!(MSG.to_string(), *(*(*lmr.as_ptr() as *const Data)).0) };
     ///     // receive the data in mr while avoiding the immediate data is ok.
     ///     let lmr = rdma.receive().await?;
-    ///     unsafe { assert_eq!(MSG.to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
+    ///     unsafe { assert_eq!(MSG.to_string(), *(*(*lmr.as_ptr() as *const Data)).0) };
     ///     // `receive_with_imm` works well even if the client didn't send any immediate data.
     ///     // the imm received will be a `None`.
     ///     let (lmr, imm) = rdma.receive_with_imm().await?;
     ///     assert_eq!(imm, None);
-    ///     unsafe { assert_eq!(MSG.to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
+    ///     unsafe { assert_eq!(MSG.to_string(), *(*(*lmr.as_ptr() as *const Data)).0) };
     ///     // compared to the above, using `receive` is a better choice.
     ///     let lmr = rdma.receive().await?;
-    ///     unsafe { assert_eq!(MSG.to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
+    ///     unsafe { assert_eq!(MSG.to_string(), *(*(*lmr.as_ptr() as *const Data)).0) };
     ///     // wait for the agent thread to send all reponses to the remote.
     ///     tokio::time::sleep(Duration::from_secs(1)).await;
     ///     Ok(())
@@ -705,7 +709,7 @@ impl Rdma {
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     let mut rmr = rdma.request_remote_mr(Layout::new::<Data>()).await?;
     ///     let data = Data(MSG.to_string());
-    ///     unsafe { *(lmr.as_mut_ptr() as *mut Data) = data };
+    ///     unsafe { *(*lmr.as_mut_ptr() as *mut Data) = data };
     ///     // write the content of lmr to remote mr with immediate data.
     ///     rdma.write_with_imm(&lmr, &mut rmr, IMM_NUM).await?;
     ///     // then send the metadata of rmr to server to make server aware of this mr.
@@ -723,7 +727,7 @@ impl Rdma {
     ///     // receive the metadata of the lmr that had been requested by client
     ///     let lmr = rdma.receive_local_mr().await?;
     ///     // assert the content of lmr, which was `write` by client
-    ///     unsafe { assert_eq!(MSG.to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
+    ///     unsafe { assert_eq!(MSG.to_string(), *(*(*lmr.as_ptr() as *const Data)).0) };
     ///     // wait for the agent thread to send all reponses to the remote.
     ///     tokio::time::sleep(Duration::from_secs(1)).await;
     ///     Ok(())
@@ -774,7 +778,7 @@ impl Rdma {
     ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     // put data into lmr
-    ///     unsafe { *(lmr.as_mut_ptr() as *mut Data) = Data("hello world".to_string()) };
+    ///     unsafe { *(*lmr.as_mut_ptr() as *mut Data) = Data("hello world".to_string()) };
     ///     // then send the metadata of this lmr to server to make server aware of this mr.
     ///     rdma.send_local_mr(lmr).await?;
     ///     Ok(())
@@ -793,7 +797,7 @@ impl Rdma {
     ///     unsafe {
     ///         assert_eq!(
     ///             "hello world".to_string(),
-    ///             *(*(lmr.as_ptr() as *const Data)).0
+    ///             *(*(*lmr.as_ptr() as *const Data)).0
     ///         )
     ///     };
     ///     Ok(())
@@ -845,7 +849,7 @@ impl Rdma {
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     let mut rmr = rdma.request_remote_mr(Layout::new::<Data>()).await?;
     ///     // put data into lmr
-    ///     unsafe { *(lmr.as_mut_ptr() as *mut Data) = Data("hello world".to_string()) };
+    ///     unsafe { *(*lmr.as_mut_ptr() as *mut Data) = Data("hello world".to_string()) };
     ///     // write the content of local mr into remote mr
     ///     rdma.write(&lmr, &mut rmr).await?;
     ///     // then send the metadata of rmr to server to make server aware of this mr.
@@ -863,7 +867,7 @@ impl Rdma {
     ///     unsafe {
     ///         assert_eq!(
     ///             "hello world".to_string(),
-    ///             *(*(lmr.as_ptr() as *const Data)).0
+    ///             *(*(*lmr.as_ptr() as *const Data)).0
     ///         )
     ///     };
     ///     Ok(())
@@ -915,7 +919,7 @@ impl Rdma {
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     let mut rmr = rdma.request_remote_mr(Layout::new::<Data>()).await?;
     ///     let data = Data(MSG.to_string());
-    ///     unsafe { *(lmr.as_mut_ptr() as *mut Data) = data };
+    ///     unsafe { *(*lmr.as_mut_ptr() as *mut Data) = data };
     ///     // write the content of lmr to server with immediate data.
     ///     rdma.write_with_imm(&lmr, &mut rmr, IMM_NUM).await?;
     ///     // then send the metadata of rmr to server to make server aware of this mr.
@@ -933,7 +937,7 @@ impl Rdma {
     ///     // receive the metadata of the lmr that had been requested by client
     ///     let lmr = rdma.receive_local_mr().await?;
     ///     // assert the content of lmr, which was `write` by client
-    ///     unsafe { assert_eq!(MSG.to_string(), *(*(lmr.as_ptr() as *const Data)).0) };
+    ///     unsafe { assert_eq!(MSG.to_string(), *(*(*lmr.as_ptr() as *const Data)).0) };
     ///     // wait for the agent thread to send all reponses to the remote.
     ///     tokio::time::sleep(Duration::from_secs(1)).await;
     ///     Ok(())
@@ -1060,7 +1064,7 @@ impl Rdma {
     ///     let rdma = Rdma::connect(addr, 1, 1, 512).await?;
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     // put data into lmr
-    ///     unsafe { *(lmr.as_mut_ptr() as *mut Data) = Data("hello world".to_string()) };
+    ///     unsafe { *(*lmr.as_mut_ptr() as *mut Data) = Data("hello world".to_string()) };
     ///     // send the content of lmr to server
     ///     rdma.send(&lmr).await?;
     ///     Ok(())
@@ -1076,7 +1080,7 @@ impl Rdma {
     ///     unsafe {
     ///         assert_eq!(
     ///             "hello world".to_string(),
-    ///             *(*(lmr.as_ptr() as *const Data)).0
+    ///             *(*(*lmr.as_ptr() as *const Data)).0
     ///         )
     ///     };
     ///     Ok(())
@@ -1467,7 +1471,7 @@ impl Rdma {
     ///     let mut lmr = rdma.alloc_local_mr(Layout::new::<Data>())?;
     ///     let mut rmr = rdma.request_remote_mr(Layout::new::<Data>()).await?;
     ///     // put data into lmr
-    ///     unsafe { *(lmr.as_mut_ptr() as *mut Data) = Data("hello world".to_string()) };
+    ///     unsafe { *(*lmr.as_mut_ptr() as *mut Data) = Data("hello world".to_string()) };
     ///     // write the content of local mr into remote mr
     ///     rdma.write(&lmr, &mut rmr).await?;
     ///     // then send the metadata of rmr to server to make server aware of this mr.
@@ -1485,7 +1489,7 @@ impl Rdma {
     ///     unsafe {
     ///         assert_eq!(
     ///         "hello world".to_string(),
-    ///         *(*(lmr.as_ptr() as *const Data)).0
+    ///         *(*(*lmr.as_ptr() as *const Data)).0
     ///     )
     ///     };
     ///     // wait for the agent thread to send all reponses to the remote.

@@ -1,4 +1,5 @@
 use crate::{
+    lock_utilities::MappedMutex,
     memory_region::{
         local::{LocalMr, LocalMrInner},
         RawMemoryRegion,
@@ -7,10 +8,9 @@ use crate::{
 };
 use clippy_utilities::Cast;
 use libc::{c_void, size_t};
-use lockfree_cuckoohash::{pin, LockFreeCuckooHash};
 use parking_lot::{Mutex, MutexGuard};
 use rdma_sys::ibv_access_flags;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::mem;
 use std::ops::Bound::Included;
 use std::{alloc::Layout, io, ptr, sync::Arc};
@@ -74,7 +74,7 @@ lazy_static! {
     #[derive(Debug)]
     pub(crate) static ref EXTENT_TOKEN_MAP: Arc<Mutex<BTreeMap<usize, Item>>> = Arc::new(Mutex::new(BTreeMap::<usize, Item>::new()));
     /// The correspondence between `arena_ind` and `ProtectionDomain`
-    pub(crate) static ref ARENA_PD_MAP: Arc<LockFreeCuckooHash<u32, Arc<ProtectionDomain>>> = Arc::new(LockFreeCuckooHash::new());
+    pub(crate) static ref ARENA_PD_MAP: Arc<Mutex<HashMap<u32, Arc<ProtectionDomain>>>> = Arc::new(Mutex::new(HashMap::new()));
 }
 
 /// Combination between extent metadata and `raw_mr`
@@ -111,7 +111,7 @@ impl MrAllocator {
     /// Allocate a `LocalMr` according to the `layout`
     #[allow(clippy::as_conversions)]
     pub(crate) fn alloc(self: &Arc<Self>, layout: &Layout) -> io::Result<LocalMr> {
-        let inner = Arc::new(self.alloc_inner(layout)?);
+        let inner = self.alloc_inner(layout)?;
         Ok(LocalMr::new(inner))
     }
 
@@ -150,37 +150,6 @@ impl MrAllocator {
             },
             |raw_mr| raw_mr,
         )
-    }
-}
-
-/// Provides functional expression methods.
-pub(crate) trait MappedMutex<T> {
-    /// Use `func` to read the value in the mutex
-    fn map_read<F, R>(&self, func: F) -> R
-    where
-        F: FnOnce(&MutexGuard<'_, T>) -> R;
-
-    /// Use `func` to write the value in the mutex
-    fn map_write<F, R>(&self, func: F) -> R
-    where
-        F: FnOnce(&mut MutexGuard<'_, T>) -> R;
-}
-
-impl<T> MappedMutex<T> for Mutex<T> {
-    fn map_read<F, R>(&self, func: F) -> R
-    where
-        F: FnOnce(&MutexGuard<'_, T>) -> R,
-    {
-        let guard = self.lock();
-        func(&guard)
-    }
-
-    fn map_write<F, R>(&self, func: F) -> R
-    where
-        F: FnOnce(&mut MutexGuard<'_, T>) -> R,
-    {
-        let mut guard = self.lock();
-        func(&mut guard)
     }
 }
 
@@ -259,7 +228,7 @@ fn create_arena() -> io::Result<u32> {
 /// Create arena and init statics
 fn init_je_statics(pd: Arc<ProtectionDomain>) -> io::Result<u32> {
     let ind = create_arena()?;
-    if ARENA_PD_MAP.insert(ind, pd) {
+    if ARENA_PD_MAP.lock().insert(ind, pd).is_some() {
         return Err(io::Error::new(
             io::ErrorKind::Other,
             "insert ARENA_PD_MAP failed",
@@ -493,8 +462,7 @@ pub(crate) fn register_extent_mr(
         "reg_mr addr {}, size {}, arena_ind {}, access {:?}",
         addr as usize, size, arena_ind, access
     );
-    let guard = pin();
-    ARENA_PD_MAP.get(&arena_ind, &guard).map_or_else(
+    ARENA_PD_MAP.lock().get(&arena_ind).map_or_else(
         || {
             error!("can not get pd from ARENA_PD_MAP");
             None

@@ -3,7 +3,7 @@ use crate::{
     event_listener::{EventListener, LmrInners},
     gid::Gid,
     memory_region::{
-        local::{LocalMrInner, LocalMrReadAccess, LocalMrWriteAccess},
+        local::{LocalMrReadAccess, LocalMrWriteAccess, RwLocalMrInner},
         remote::{RemoteMrReadAccess, RemoteMrWriteAccess},
     },
     protection_domain::ProtectionDomain,
@@ -312,17 +312,11 @@ impl QueuePair {
         let mut sr = SendWr::new_send(lms, wr_id, imm);
         self.event_listener.cq.req_notify(false)?;
         for lm in lms {
-            if !lm.try_lock_shared() {
-                return Err(io::Error::new(
-                    io::ErrorKind::AddrNotAvailable,
-                    format!("this mr is being used {:?}", lm.get_lock()),
-                ));
-            }
             debug!(
                 "post_send addr {}, len {}, lkey {} wrid: {}",
                 lm.addr(),
                 lm.length(),
-                lm.lkey(),
+                lm.lkey_unchecked(),
                 sr.as_ref().wr_id,
             );
         }
@@ -346,17 +340,11 @@ impl QueuePair {
         let mut bad_wr = std::ptr::null_mut::<ibv_recv_wr>();
         self.event_listener.cq.req_notify(false)?;
         for lm in lms {
-            if !lm.try_lock_exclusive() {
-                return Err(io::Error::new(
-                    io::ErrorKind::AddrNotAvailable,
-                    format!("this mr is being used {:?}", lm.get_lock()),
-                ));
-            }
             debug!(
                 "post_recv addr {}, len {}, lkey {} wrid: {}",
                 lm.addr(),
                 lm.length(),
-                lm.lkey(),
+                lm.lkey_unchecked(),
                 rr.as_ref().wr_id,
             );
         }
@@ -381,17 +369,11 @@ impl QueuePair {
         let mut sr = SendWr::new_read(lms, wr_id, rm);
         self.event_listener.cq.req_notify(false)?;
         for lm in lms {
-            if !lm.try_lock_exclusive() {
-                return Err(io::Error::new(
-                    io::ErrorKind::AddrNotAvailable,
-                    format!("this mr is being used {:?}", lm.get_lock()),
-                ));
-            }
             debug!(
                 "post_send addr {}, len {}, lkey {} wrid: {}",
                 lm.addr(),
                 lm.length(),
-                lm.lkey(),
+                lm.lkey_unchecked(),
                 sr.as_ref().wr_id,
             );
         }
@@ -422,17 +404,11 @@ impl QueuePair {
         let mut sr = SendWr::new_write(lms, wr_id, rm, imm);
         self.event_listener.cq.req_notify(false)?;
         for lm in lms {
-            if !lm.try_lock_shared() {
-                return Err(io::Error::new(
-                    io::ErrorKind::AddrNotAvailable,
-                    format!("this mr is being used {:?}", lm.get_lock()),
-                ));
-            }
             debug!(
-                "post_send addr {}, len {}, lkey {} wrid: {}",
+                "post_send addr {}, len {}, lkey_unchecked {} wrid: {}",
                 lm.addr(),
                 lm.length(),
-                lm.lkey(),
+                lm.lkey_unchecked(),
                 sr.as_ref().wr_id,
             );
         }
@@ -478,7 +454,9 @@ impl QueuePair {
         LW: LocalMrWriteAccess,
         RR: RemoteMrReadAccess,
     {
-        let (wr_id, mut resp_rx) = self.event_listener.register(&get_mut_lmr_inners(lms));
+        let (wr_id, mut resp_rx) = self
+            .event_listener
+            .register_for_write(&get_mut_lmr_inners(lms));
         let len: usize = lms.iter().map(|lm| lm.length()).sum();
         self.submit_read(lms, rm, wr_id)?;
         resp_rx
@@ -501,7 +479,7 @@ impl QueuePair {
         LR: LocalMrReadAccess,
         RW: RemoteMrWriteAccess,
     {
-        let (wr_id, mut resp_rx) = self.event_listener.register(&get_lmr_inners(lms));
+        let (wr_id, mut resp_rx) = self.event_listener.register_for_read(&get_lmr_inners(lms));
         let len: usize = lms.iter().map(|lm| lm.length()).sum();
         self.submit_write(lms, rm, wr_id, imm)?;
         resp_rx
@@ -563,7 +541,7 @@ where
     LR: LocalMrReadAccess,
 {
     lms.iter()
-        .map(|lm| Arc::<LocalMrInner>::clone(lm.get_inner()))
+        .map(|lm| Arc::<RwLocalMrInner>::clone(lm.get_inner()))
         .collect()
 }
 
@@ -729,7 +707,7 @@ impl<Op: QueuePairOp + Unpin> Future for QueuePairOps<Op> {
         let s = self.get_mut();
         match s.state {
             QueuePairOpsState::Init(ref inners) => {
-                let (wr_id, recv) = s.qp.event_listener.register(inners);
+                let (wr_id, recv) = s.qp.event_listener.register_for_write(inners);
                 s.state = QueuePairOpsState::Submit(wr_id, Some(recv));
                 Pin::new(s).poll(cx)
             }

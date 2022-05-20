@@ -456,7 +456,7 @@ impl QueuePair {
     {
         let (wr_id, mut resp_rx) = self
             .event_listener
-            .register_for_write(&get_mut_lmr_inners(lms));
+            .register_for_write(&get_mut_lmr_inners(lms))?;
         let len: usize = lms.iter().map(|lm| lm.length()).sum();
         self.submit_read(lms, rm, wr_id)?;
         resp_rx
@@ -479,7 +479,9 @@ impl QueuePair {
         LR: LocalMrReadAccess,
         RW: RemoteMrWriteAccess,
     {
-        let (wr_id, mut resp_rx) = self.event_listener.register_for_read(&get_lmr_inners(lms));
+        let (wr_id, mut resp_rx) = self
+            .event_listener
+            .register_for_read(&get_lmr_inners(lms))?;
         let len: usize = lms.iter().map(|lm| lm.length()).sum();
         self.submit_write(lms, rm, wr_id, imm)?;
         resp_rx
@@ -707,7 +709,7 @@ impl<Op: QueuePairOp + Unpin> Future for QueuePairOps<Op> {
         let s = self.get_mut();
         match s.state {
             QueuePairOpsState::Init(ref inners) => {
-                let (wr_id, recv) = s.qp.event_listener.register_for_write(inners);
+                let (wr_id, recv) = s.qp.event_listener.register_for_write(inners)?;
                 s.state = QueuePairOpsState::Submit(wr_id, Some(recv));
                 Pin::new(s).poll(cx)
             }

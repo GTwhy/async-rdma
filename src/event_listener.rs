@@ -4,7 +4,7 @@ use crate::{
     lock_utilities::ArcRwLockGuard,
     memory_region::local::RwLocalMrInner,
 };
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, io, sync::Arc, time::Duration};
 use tokio::{
     // Using mpsc here bacause the `oneshot` Sender needs its own ownership when it performs a `send`.
     // But we cann't get the ownership from LockFreeCuckooHash because of the principle of it.
@@ -112,15 +112,35 @@ impl EventListener {
         &self,
         inners: &[Arc<RwLocalMrInner>],
         is_write: bool,
-    ) -> (WorkRequestId, Receiver<WorkCompletion>) {
+    ) -> io::Result<(WorkRequestId, Receiver<WorkCompletion>)> {
         let (tx, rx) = channel(2);
         let wr_id = WorkRequestId::new();
         let mut guards = vec![];
         for inner in inners {
             if is_write {
-                guards.push(ArcRwLockGuard::RwLockWriteGuard(inner.write_arc()));
+                match inner.try_write_arc() {
+                    Some(write_guard) => {
+                        guards.push(ArcRwLockGuard::RwLockWriteGuard(write_guard));
+                    }
+                    None => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            format!("{:?} is locked by other ops", &inner),
+                        ))
+                    }
+                }
             } else {
-                guards.push(ArcRwLockGuard::RwLockReadGuard(inner.read_arc()));
+                match inner.try_read_arc() {
+                    Some(read_guard) => {
+                        guards.push(ArcRwLockGuard::RwLockReadGuard(read_guard));
+                    }
+                    None => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            format!("{:?} is locked by other ops", &inner),
+                        ))
+                    }
+                }
             }
         }
         let key = self.req_map.lock().insert_until_success(
@@ -128,14 +148,14 @@ impl EventListener {
             (tx, inners.to_owned(), guards),
             WorkRequestId::new,
         );
-        (key, rx)
+        Ok((key, rx))
     }
 
     /// Register `LocalMrInner`s before read data from them
     pub(crate) fn register_for_read(
         &self,
         inners: &[Arc<RwLocalMrInner>],
-    ) -> (WorkRequestId, Receiver<WorkCompletion>) {
+    ) -> io::Result<(WorkRequestId, Receiver<WorkCompletion>)> {
         self.register(inners, false)
     }
 
@@ -143,7 +163,7 @@ impl EventListener {
     pub(crate) fn register_for_write(
         &self,
         inners: &[Arc<RwLocalMrInner>],
-    ) -> (WorkRequestId, Receiver<WorkCompletion>) {
+    ) -> io::Result<(WorkRequestId, Receiver<WorkCompletion>)> {
         self.register(inners, true)
     }
 }

@@ -11,7 +11,15 @@ use std::{
 use tracing::debug;
 
 /// Local memory region trait
-pub trait LocalMrReadAccess: MrAccess {
+///
+/// # Safety
+///
+/// For the `fn`s that have not been marked as `unsafe`, we should make sure the implementations
+/// meet all safety requirements, for example the memory of mrs should be initialized.
+///
+/// For the `unsafe` `fn`s, we should make sure no other safety issues have been introduced except
+/// for the issues that have been listed in the `Safety` documents of `fn`s.
+pub unsafe trait LocalMrReadAccess: MrAccess {
     /// Get the start pointer until it is readable
     ///
     /// If this mr is being used in RDMA ops, the thread may be blocked
@@ -35,14 +43,12 @@ pub trait LocalMrReadAccess: MrAccess {
 
     /// Get the start pointer without lock
     ///
-    /// # Safety:
+    /// # Safety
     ///
-    /// make sure the mr is readable without cancel safety issue
-    ///
-    /// TODO: move unchecked methords to unsafe trait
+    /// Make sure the mr is readable without cancel safety issue
     #[inline]
     #[allow(clippy::as_conversions)]
-    fn as_ptr_unchecked(&self) -> *const u8 {
+    unsafe fn as_ptr_unchecked(&self) -> *const u8 {
         self.addr() as _
     }
 
@@ -79,16 +85,14 @@ pub trait LocalMrReadAccess: MrAccess {
 
     /// Get the memory region as slice without lock
     ///
-    /// # Safety:
+    /// # Safety
     ///
-    /// make sure the mr is readable without cancel safety issue
-    ///
-    /// TODO: move unchecked methords to unsafe trait
+    /// Make sure the mr is readable without cancel safety issue
     #[inline]
-    fn as_slice_unchecked(&self) -> &[u8] {
+    unsafe fn as_slice_unchecked(&self) -> &[u8] {
         // SAFETY: unsoundness
         // BUG: unsound public api
-        unsafe { slice::from_raw_parts(self.as_ptr_unchecked(), self.length()) }
+        slice::from_raw_parts(self.as_ptr_unchecked(), self.length())
     }
 
     /// Get the local key
@@ -96,43 +100,68 @@ pub trait LocalMrReadAccess: MrAccess {
 
     /// Get the local key without lock
     ///
-    /// # Safety:
+    /// # Safety
     ///
-    /// make sure the mr is readable without cancel safety issue
+    /// Must ensure that there are no data races, for example:
     ///
-    /// TODO: move to unsafe trait
+    /// * The current thread logically owns a guard but that guard has been discarded using `mem::forget`.
+    /// * The `lkey` of this mr is going to be changed.(It's not going to happen so far, because variable
+    /// lkey has not been implemented yet.)
     #[inline]
     #[allow(clippy::unreachable)] // inner will not be null
-    fn lkey_unchecked(&self) -> u32 {
-        // SAFETY: unsoundness
-        // BUG: unsound public api
-        unsafe {
-            <*const LocalMrInner>::as_ref(self.get_inner().data_ptr())
-                .map_or_else(|| unreachable!("get null inner"), LocalMrInner::lkey)
-        }
+    unsafe fn lkey_unchecked(&self) -> u32 {
+        // SAFETY: must ensure that there are no data races
+        let inner = self.get_inner().data_ptr();
+        // SAFETY: rely on the former ?
+        <*const LocalMrInner>::as_ref(inner)
+            .map_or_else(|| unreachable!("get null inner"), LocalMrInner::lkey)
     }
 
     /// Get the remote key without lock
     ///
-    /// # Safety:
+    /// # Safety
     ///
-    /// make sure the mr is readable without cancel safety issue
-    ///
-    /// TODO: move to unsafe trait
+    /// Must ensure that there are no data races, for example:
+    /// * The current thread logically owns a guard but that guard has been discarded using `mem::forget`.
+    /// * The `rkey` of this mr is going to be changed.(It's not going to happen so far, because variable
+    /// rkey has not been implemented yet.)
     #[inline]
     #[allow(clippy::unreachable)] // inner will not be null
-    fn rkey_unchecked(&self) -> u32 {
-        // SAFETY: unsoundness
-        // BUG: unsound public api
-        unsafe {
-            <*const LocalMrInner>::as_ref(self.get_inner().data_ptr())
-                .map_or_else(|| unreachable!("get null inner"), MrAccess::rkey)
-        }
+    unsafe fn rkey_unchecked(&self) -> u32 {
+        // SAFETY: must ensure that there are no data races
+        let inner = self.get_inner().data_ptr();
+        // SAFETY: rely on the former ?
+        <*const LocalMrInner>::as_ref(inner)
+            .map_or_else(|| unreachable!("get null inner"), LocalMrInner::rkey)
     }
 
     /// New a token with specified timeout
     #[inline]
     fn token_with_timeout(&self, timeout: Duration) -> Option<MrToken> {
+        SystemTime::now().checked_add(timeout).map_or_else(
+            || None,
+            |ddl| {
+                Some(MrToken {
+                    addr: self.addr(),
+                    len: self.length(),
+                    rkey: self.rkey(),
+                    ddl,
+                })
+            },
+        )
+    }
+
+    /// New a token with specified timeout with `rkey_unchecked`
+    ///
+    /// # Safety
+    ///
+    /// Must ensure that there are no data races about `rkey`, for example:
+    /// * The current thread logically owns a guard but that guard has been discarded using `mem::forget`.
+    /// * The `rkey` of this mr is going to be changed.(It's not going to happen so far, because variable
+    /// rkey has not been implemented yet.)
+    ///
+    #[inline]
+    unsafe fn token_with_timeout_unchecked(&self, timeout: Duration) -> Option<MrToken> {
         SystemTime::now().checked_add(timeout).map_or_else(
             || None,
             |ddl| {
@@ -145,6 +174,7 @@ pub trait LocalMrReadAccess: MrAccess {
             },
         )
     }
+
     /// Get the corresponding `RwLocalMrInner`
     fn get_inner(&self) -> &Arc<RwLocalMrInner>;
 
@@ -162,7 +192,15 @@ pub trait LocalMrReadAccess: MrAccess {
 }
 
 /// Writable local mr trait
-pub trait LocalMrWriteAccess: MrAccess + LocalMrReadAccess {
+///
+/// # Safety
+///
+/// For the `fn`s that have not been marked as `unsafe`, we should make sure the implementations
+/// meet all safety requirements, for example the memory should be initialized.
+///
+/// For the `unsafe` `fn`s, we should make sure no other safety issues have been introduced except
+/// for the issues that have been listed in the `Safety` documents of `fn`s.
+pub unsafe trait LocalMrWriteAccess: MrAccess + LocalMrReadAccess {
     /// Get the mutable start pointer until it is writeable
     ///
     /// If this mr is being used in RDMA ops, the thread may be blocked
@@ -186,14 +224,12 @@ pub trait LocalMrWriteAccess: MrAccess + LocalMrReadAccess {
 
     /// Get the memory region start mut addr without lock
     ///
-    /// # Safety:
+    /// # Safety
     ///
     /// make sure the mr is writeable without cancel safety issue
-    ///
-    /// TODO: move unchecked methords to unsafe trait
     #[inline]
     #[allow(clippy::as_conversions)]
-    fn as_mut_ptr_unchecked(&mut self) -> *mut u8 {
+    unsafe fn as_mut_ptr_unchecked(&mut self) -> *mut u8 {
         // const pointer to mut pointer is safe
         self.as_ptr_unchecked() as _
     }
@@ -232,16 +268,14 @@ pub trait LocalMrWriteAccess: MrAccess + LocalMrReadAccess {
 
     /// Get the memory region as mut slice without lock
     ///
-    /// # Safety:
+    /// # Safety
     ///
     /// make sure the mr is writeable without cancel safety issue
-    ///
-    /// TODO: move unchecked methords to unsafe trait
     #[inline]
-    fn as_mut_slice_unchecked(&mut self) -> &mut [u8] {
+    unsafe fn as_mut_slice_unchecked(&mut self) -> &mut [u8] {
         // SAFETY: unsoundness
         // BUG: unsound public api
-        unsafe { slice::from_raw_parts_mut(self.as_mut_ptr_unchecked(), self.length()) }
+        slice::from_raw_parts_mut(self.as_mut_ptr_unchecked(), self.length())
     }
 
     /// Is the corresponding `RwLocalMrInner` writeable?
@@ -285,7 +319,7 @@ impl MrAccess for LocalMr {
     }
 }
 
-impl LocalMrReadAccess for LocalMr {
+unsafe impl LocalMrReadAccess for LocalMr {
     #[inline]
     fn lkey(&self) -> u32 {
         self.read_inner().lkey()
@@ -297,7 +331,7 @@ impl LocalMrReadAccess for LocalMr {
     }
 }
 
-impl LocalMrWriteAccess for LocalMr {}
+unsafe impl LocalMrWriteAccess for LocalMr {}
 
 impl LocalMr {
     /// New Local Mr
@@ -487,7 +521,7 @@ impl MrAccess for &LocalMr {
     }
 }
 
-impl LocalMrReadAccess for &LocalMr {
+unsafe impl LocalMrReadAccess for &LocalMr {
     #[inline]
     fn lkey(&self) -> u32 {
         self.read_inner().lkey()
@@ -529,7 +563,7 @@ impl MrAccess for LocalMrSlice<'_> {
     }
 }
 
-impl LocalMrReadAccess for LocalMrSlice<'_> {
+unsafe impl LocalMrReadAccess for LocalMrSlice<'_> {
     fn lkey(&self) -> u32 {
         self.lmr.lkey()
     }
@@ -604,7 +638,7 @@ impl MrAccess for LocalMrSliceMut<'_> {
     }
 }
 
-impl LocalMrReadAccess for LocalMrSliceMut<'_> {
+unsafe impl LocalMrReadAccess for LocalMrSliceMut<'_> {
     fn lkey(&self) -> u32 {
         self.lmr.lkey()
     }
@@ -615,4 +649,4 @@ impl LocalMrReadAccess for LocalMrSliceMut<'_> {
     }
 }
 
-impl LocalMrWriteAccess for LocalMrSliceMut<'_> {}
+unsafe impl LocalMrWriteAccess for LocalMrSliceMut<'_> {}

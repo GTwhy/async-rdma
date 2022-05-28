@@ -757,7 +757,7 @@ mod tests {
         let pd = Arc::new(ctx.create_protection_domain()?);
         let allocator = Arc::new(MrAllocator::new(pd));
         let lmr = allocator.alloc_zeroed(&Layout::new::<[u8; 10]>()).unwrap();
-        assert_eq!(*lmr.as_slice(), [0_u8; 10]);
+        assert_eq!(*lmr.as_slice().unwrap(), [0_u8; 10]);
         Ok(())
     }
 }

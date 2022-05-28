@@ -30,8 +30,8 @@ mod local_mr_slice {
         assert_eq!(s4.length(), 1);
         assert_eq!(s4.addr(), lmr.addr() + s4_pos);
         let mut s5 = lmr.get_mut(0..hello.len()).unwrap();
-        s5.as_mut_slice().copy_from_slice(hello.as_bytes());
-        assert_eq!(*s5.as_slice(), b"hello");
+        s5.as_mut_slice().unwrap().copy_from_slice(hello.as_bytes());
+        assert_eq!(*s5.as_slice().unwrap(), b"hello");
         Ok(())
     }
 

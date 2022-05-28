@@ -1,5 +1,6 @@
 use super::{raw::RawMemoryRegion, MrAccess, MrToken};
 use crate::lock_utilities::{MappedRwLockReadGuard, MappedRwLockWriteGuard};
+use clippy_utilities::Cast;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::{
     fmt::Debug,
@@ -55,43 +56,52 @@ pub unsafe trait LocalMrReadAccess: MrAccess {
     /// Get the memory region as slice until it is readable
     ///
     /// If this mr is being used in RDMA ops, the thread may be blocked
+    ///
+    /// Return `None` if the total size of this mr larger than `isize::MAX`
     #[inline]
     #[allow(clippy::as_conversions)]
-    fn as_slice(&self) -> MappedRwLockReadGuard<&[u8]> {
-        // SAFETY: unsoundness
-        // BUG: unsound public api
-        MappedRwLockReadGuard::map(self.as_ptr(), |ptr| unsafe {
-            slice::from_raw_parts(ptr, self.length())
-        })
+    fn as_slice(&self) -> Option<MappedRwLockReadGuard<&[u8]>> {
+        if self.length() > isize::MAX.cast() {
+            None
+        } else {
+            // SAFETY: memory of this mr should be initialized
+            Some(MappedRwLockReadGuard::map(self.as_ptr(), |ptr| unsafe {
+                slice::from_raw_parts(ptr, self.length())
+            }))
+        }
     }
 
     /// Try to get the memory region as slice
     ///
     /// Return `None` if this mr is being used in RDMA ops without blocking thread
+    /// or the total size of this mr larger than `isize::MAX`
     #[allow(clippy::as_conversions)]
     #[inline]
     fn try_as_slice(&self) -> Option<MappedRwLockReadGuard<&[u8]>> {
-        self.try_as_ptr().map_or_else(
-            || None,
-            |guard| {
-                // SAFETY: unsoundness
-                // BUG: unsound public api
-                return Some(MappedRwLockReadGuard::map(guard, |ptr| unsafe {
-                    slice::from_raw_parts(ptr, self.length())
-                }));
-            },
-        )
+        if self.length() > isize::MAX.cast() {
+            None
+        } else {
+            self.try_as_ptr().map_or_else(
+                || None,
+                |guard| {
+                    // SAFETY: memory of this mr should be initialized
+                    return Some(MappedRwLockReadGuard::map(guard, |ptr| unsafe {
+                        slice::from_raw_parts(ptr, self.length())
+                    }));
+                },
+            )
+        }
     }
 
     /// Get the memory region as slice without lock
     ///
     /// # Safety
     ///
-    /// Make sure the mr is readable without cancel safety issue
+    /// * Make sure the mr is readable without cancel safety issue.
+    /// * The memory of this mr is initialized.
+    /// * The total size of this mr of the slice must be no larger than `isize::MAX`.
     #[inline]
     unsafe fn as_slice_unchecked(&self) -> &[u8] {
-        // SAFETY: unsoundness
-        // BUG: unsound public api
         slice::from_raw_parts(self.as_ptr_unchecked(), self.length())
     }
 
@@ -226,7 +236,7 @@ pub unsafe trait LocalMrWriteAccess: MrAccess + LocalMrReadAccess {
     ///
     /// # Safety
     ///
-    /// make sure the mr is writeable without cancel safety issue
+    /// Make sure the mr is writeable without cancel safety issue
     #[inline]
     #[allow(clippy::as_conversions)]
     unsafe fn as_mut_ptr_unchecked(&mut self) -> *mut u8 {
@@ -237,44 +247,54 @@ pub unsafe trait LocalMrWriteAccess: MrAccess + LocalMrReadAccess {
     /// Get the memory region as mutable slice until it is writeable
     ///
     /// If this mr is being used in RDMA ops, the thread may be blocked
+    ///
+    /// Return `None` if the total size of this mr larger than `isize::MAX`
     #[inline]
     #[allow(clippy::as_conversions)]
-    fn as_mut_slice(&mut self) -> MappedRwLockWriteGuard<&mut [u8]> {
+    fn as_mut_slice(&mut self) -> Option<MappedRwLockWriteGuard<&mut [u8]>> {
         let len = self.length();
-        // SAFETY: unsoundness
-        // BUG: unsound public api
-        MappedRwLockWriteGuard::map(self.as_mut_ptr(), |ptr| unsafe {
-            slice::from_raw_parts_mut(ptr, len)
-        })
+        if self.length() > isize::MAX.cast() {
+            None
+        } else {
+            Some(MappedRwLockWriteGuard::map(
+                self.as_mut_ptr(),
+                // SAFETY: memory of this mr should be initialized
+                |ptr| unsafe { slice::from_raw_parts_mut(ptr, len) },
+            ))
+        }
     }
 
     /// Try to get the memory region as mutable slice
     ///
     /// Return `None` if this mr is being used in RDMA ops without blocking thread
+    /// or the total size of this mr larger than `isize::MAX`
     #[allow(clippy::as_conversions)]
     #[inline]
     fn try_as_mut_slice(&mut self) -> Option<MappedRwLockWriteGuard<&mut [u8]>> {
-        self.try_as_mut_ptr().map_or_else(
-            || None,
-            |guard| {
-                // SAFETY: unsoundness
-                // BUG: unsound public api
-                return Some(MappedRwLockWriteGuard::map(guard, |ptr| unsafe {
-                    slice::from_raw_parts_mut(ptr, self.length())
-                }));
-            },
-        )
+        if self.length() > isize::MAX.cast() {
+            None
+        } else {
+            self.try_as_mut_ptr().map_or_else(
+                || None,
+                |guard| {
+                    // SAFETY: memory of this mr should be initialized
+                    return Some(MappedRwLockWriteGuard::map(guard, |ptr| unsafe {
+                        slice::from_raw_parts_mut(ptr, self.length())
+                    }));
+                },
+            )
+        }
     }
 
     /// Get the memory region as mut slice without lock
     ///
     /// # Safety
     ///
-    /// make sure the mr is writeable without cancel safety issue
+    /// * Make sure the mr is writeable without cancel safety issue.
+    /// * The memory of this mr is initialized.
+    /// * The total size of this mr of the slice must be no larger than `isize::MAX`.
     #[inline]
     unsafe fn as_mut_slice_unchecked(&mut self) -> &mut [u8] {
-        // SAFETY: unsoundness
-        // BUG: unsound public api
         slice::from_raw_parts_mut(self.as_mut_ptr_unchecked(), self.length())
     }
 

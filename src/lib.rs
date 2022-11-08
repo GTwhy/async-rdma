@@ -397,7 +397,7 @@ impl RdmaBuilder {
     /// }
     /// ```
     #[inline]
-    pub async fn connect<A: ToSocketAddrs>(self, addr: A) -> io::Result<Rdma> {
+    pub async fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> io::Result<Rdma> {
         match self.qp_attr.conn_type {
             ConnectionType::RCSocket => {
                 let mut rdma = self.build()?;
@@ -425,7 +425,7 @@ impl RdmaBuilder {
     ///
     /// The example is the same as `Rdma::ibv_connect`.
     #[inline]
-    pub async fn ibv_connect(self, remote: QueuePairEndpoint) -> io::Result<Rdma> {
+    pub async fn ibv_connect(&mut self, remote: QueuePairEndpoint) -> io::Result<Rdma> {
         match self.qp_attr.conn_type {
             ConnectionType::RCIBV => {
                 let mut rdma = self.build()?;
@@ -536,7 +536,7 @@ impl RdmaBuilder {
     /// ```
     #[inline]
     #[cfg(feature = "cm")]
-    pub async fn cm_connect(self, node: &str, service: &str) -> io::Result<Rdma> {
+    pub async fn cm_connect(&mut self, node: &str, service: &str) -> io::Result<Rdma> {
         match self.qp_attr.conn_type {
             ConnectionType::RCSocket | ConnectionType::RCIBV => Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -590,7 +590,7 @@ impl RdmaBuilder {
     /// }
     /// ```
     #[inline]
-    pub async fn listen<A: ToSocketAddrs>(self, addr: A) -> io::Result<Rdma> {
+    pub async fn listen<A: ToSocketAddrs>(&mut self, addr: A) -> io::Result<Rdma> {
         match self.qp_attr.conn_type {
             ConnectionType::RCSocket => {
                 let recv_attr_builder = self.qp_attr.rq_attr;
@@ -622,7 +622,7 @@ impl RdmaBuilder {
     /// Set device name
     #[inline]
     #[must_use]
-    pub fn set_dev(mut self, dev: &str) -> Self {
+    pub fn set_dev(&mut self, dev: &str) -> &mut Self {
         self.dev_attr.dev_name = Some(dev.to_owned());
         self
     }
@@ -630,7 +630,7 @@ impl RdmaBuilder {
     /// Set the complete queue size
     #[inline]
     #[must_use]
-    pub fn set_cq_size(mut self, cq_size: u32) -> Self {
+    pub fn set_cq_size(&mut self, cq_size: u32) -> &mut Self {
         self.cq_attr.cq_size = cq_size;
         self
     }
@@ -638,7 +638,7 @@ impl RdmaBuilder {
     /// Set the gid index
     #[inline]
     #[must_use]
-    pub fn set_gid_index(mut self, gid_index: usize) -> Self {
+    pub fn set_gid_index(&mut self, gid_index: usize) -> &mut Self {
         // TODO: check gid_index scope(ibv_port_attr.gid_tbl_len)
         let _ = self
             .qp_attr
@@ -652,7 +652,7 @@ impl RdmaBuilder {
     /// Set the port number
     #[inline]
     #[must_use]
-    pub fn set_port_num(mut self, port_num: u8) -> Self {
+    pub fn set_port_num(&mut self, port_num: u8) -> &mut Self {
         let _ = self.qp_attr.rq_attr.address_handler().port_num(port_num);
         self
     }
@@ -660,7 +660,7 @@ impl RdmaBuilder {
     /// Set the connection type
     #[inline]
     #[must_use]
-    pub fn set_conn_type(mut self, conn_type: ConnectionType) -> Self {
+    pub fn set_conn_type(&mut self, conn_type: ConnectionType) -> &mut Self {
         self.qp_attr.conn_type = conn_type;
         self
     }
@@ -668,7 +668,7 @@ impl RdmaBuilder {
     /// Set if send/recv raw data
     #[inline]
     #[must_use]
-    pub fn set_raw(mut self, raw: bool) -> Self {
+    pub fn set_raw(&mut self, raw: bool) -> &mut Self {
         self.qp_attr.raw = raw;
         self
     }
@@ -676,7 +676,7 @@ impl RdmaBuilder {
     /// Set maximum number of outstanding send requests in the send queue
     #[inline]
     #[must_use]
-    pub fn set_qp_max_send_wr(mut self, max_send_wr: u32) -> Self {
+    pub fn set_qp_max_send_wr(&mut self, max_send_wr: u32) -> &mut Self {
         let _ = self.qp_attr.init_attr.qp_cap().max_send_wr(max_send_wr);
         self
     }
@@ -684,7 +684,7 @@ impl RdmaBuilder {
     /// Set maximum number of outstanding receive requests in the receive queue
     #[inline]
     #[must_use]
-    pub fn set_qp_max_recv_wr(mut self, max_recv_wr: u32) -> Self {
+    pub fn set_qp_max_recv_wr(&mut self, max_recv_wr: u32) -> &mut Self {
         let _ = self.qp_attr.init_attr.qp_cap().max_recv_wr(max_recv_wr);
         self
     }
@@ -692,7 +692,7 @@ impl RdmaBuilder {
     /// Set maximum number of scatter/gather elements (SGE) in a WR on the send queue
     #[inline]
     #[must_use]
-    pub fn set_qp_max_send_sge(mut self, max_send_sge: u32) -> Self {
+    pub fn set_qp_max_send_sge(&mut self, max_send_sge: u32) -> &mut Self {
         let _ = self.qp_attr.init_attr.qp_cap().max_send_sge(max_send_sge);
         self
     }
@@ -700,7 +700,7 @@ impl RdmaBuilder {
     /// Set maximum number of scatter/gather elements (SGE) in a WR on the receive queue
     #[inline]
     #[must_use]
-    pub fn set_qp_max_recv_sge(mut self, max_recv_sge: u32) -> Self {
+    pub fn set_qp_max_recv_sge(&mut self, max_recv_sge: u32) -> &mut Self {
         let _ = self.qp_attr.init_attr.qp_cap().max_recv_sge(max_recv_sge);
         self
     }
@@ -708,7 +708,7 @@ impl RdmaBuilder {
     /// Set default `QP` access
     #[inline]
     #[must_use]
-    pub fn set_qp_access(mut self, flags: BitFlags<AccessFlag>) -> Self {
+    pub fn set_qp_access(&mut self, flags: BitFlags<AccessFlag>) -> &mut Self {
         let _ = self.qp_attr.init_attr.access(flags_into_ibv_access(flags));
         self
     }
@@ -716,7 +716,7 @@ impl RdmaBuilder {
     /// Set default `MR` access
     #[inline]
     #[must_use]
-    pub fn set_mr_access(mut self, flags: BitFlags<AccessFlag>) -> Self {
+    pub fn set_mr_access(&mut self, flags: BitFlags<AccessFlag>) -> &mut Self {
         let _ = self.qp_attr.init_attr.access(flags_into_ibv_access(flags));
         self
     }
@@ -724,7 +724,7 @@ impl RdmaBuilder {
     /// Set the stragety to manage `MR`s
     #[inline]
     #[must_use]
-    pub fn set_mr_strategy(mut self, strategy: MRManageStrategy) -> Self {
+    pub fn set_mr_strategy(&mut self, strategy: MRManageStrategy) -> &mut Self {
         self.mr_attr.strategy = strategy;
         self
     }
@@ -732,7 +732,7 @@ impl RdmaBuilder {
     /// Set max length of message send/recv by Agent
     #[inline]
     #[must_use]
-    pub fn set_max_message_length(mut self, max_msg_len: usize) -> Self {
+    pub fn set_max_message_length(&mut self, max_msg_len: usize) -> &mut Self {
         self.agent_attr.max_message_length = max_msg_len;
         self
     }
@@ -740,7 +740,7 @@ impl RdmaBuilder {
     /// Set max access permission for remote mr requests
     #[inline]
     #[must_use]
-    pub fn set_max_rmr_access(mut self, flags: BitFlags<AccessFlag>) -> Self {
+    pub fn set_max_rmr_access(&mut self, flags: BitFlags<AccessFlag>) -> &mut Self {
         self.agent_attr.max_rmr_access = flags_into_ibv_access(flags);
         self
     }
@@ -751,7 +751,7 @@ impl RdmaBuilder {
     /// handled by this QP as a destination. Relevant only for RC QPs.
     #[inline]
     #[must_use]
-    pub fn set_max_dest_rd_atomic(mut self, max_dest_rd_atomic: u8) -> Self {
+    pub fn set_max_dest_rd_atomic(&mut self, max_dest_rd_atomic: u8) -> &mut Self {
         let _ = self.qp_attr.rq_attr.max_dest_rd_atomic(max_dest_rd_atomic);
         self
     }
@@ -829,7 +829,7 @@ impl RdmaBuilder {
     /// Relevant only for RC QPs
     #[inline]
     #[must_use]
-    pub fn set_min_rnr_timer(mut self, min_rnr_timer: u8) -> Self {
+    pub fn set_min_rnr_timer(&mut self, min_rnr_timer: u8) -> &mut Self {
         let _ = self.qp_attr.rq_attr.min_rnr_timer(min_rnr_timer);
         self
     }
@@ -837,7 +837,7 @@ impl RdmaBuilder {
     /// Set a 24 bits value of the Packet Sequence Number of the received packets for RC and UC QPs
     #[inline]
     #[must_use]
-    pub fn set_rq_psn(mut self, rq_psn: u32) -> Self {
+    pub fn set_rq_psn(&mut self, rq_psn: u32) -> &mut Self {
         let _ = self.qp_attr.rq_attr.rq_psn(rq_psn);
         self
     }
@@ -846,7 +846,7 @@ impl RdmaBuilder {
     /// this QP as an initiator. Relevant only for RC QPs.
     #[inline]
     #[must_use]
-    pub fn set_max_rd_atomic(mut self, max_rd_atomic: u8) -> Self {
+    pub fn set_max_rd_atomic(&mut self, max_rd_atomic: u8) -> &mut Self {
         let _ = self.qp_attr.sq_attr.max_rd_atomic(max_rd_atomic);
         self
     }
@@ -855,7 +855,7 @@ impl RdmaBuilder {
     /// reporting an error because the remote side doesn't answer in the primary path
     #[inline]
     #[must_use]
-    pub fn set_retry_cnt(mut self, retry_cnt: u8) -> Self {
+    pub fn set_retry_cnt(&mut self, retry_cnt: u8) -> &mut Self {
         let _ = self.qp_attr.sq_attr.retry_cnt(retry_cnt);
         self
     }
@@ -865,7 +865,7 @@ impl RdmaBuilder {
     /// to retry infinite times in case of RNR.
     #[inline]
     #[must_use]
-    pub fn set_rnr_retry(mut self, rnr_retry: u8) -> Self {
+    pub fn set_rnr_retry(&mut self, rnr_retry: u8) -> &mut Self {
         let _ = self.qp_attr.sq_attr.rnr_retry(rnr_retry);
         self
     }
@@ -873,7 +873,7 @@ impl RdmaBuilder {
     /// Set a 24 bits value of the Packet Sequence Number of the sent packets for any QP.
     #[inline]
     #[must_use]
-    pub fn set_sq_psn(mut self, sq_psn: u32) -> Self {
+    pub fn set_sq_psn(&mut self, sq_psn: u32) -> &mut Self {
         let _ = self.qp_attr.sq_attr.sq_psn(sq_psn);
         self
     }
@@ -884,7 +884,7 @@ impl RdmaBuilder {
     /// Relevant only to RC QPs.
     #[inline]
     #[must_use]
-    pub fn set_timeout(mut self, timeout: u8) -> Self {
+    pub fn set_timeout(&mut self, timeout: u8) -> &mut Self {
         let _ = self.qp_attr.sq_attr.timeout(timeout);
         self
     }
@@ -892,7 +892,7 @@ impl RdmaBuilder {
     /// Set the Service Level to be used. 4 bits.
     #[inline]
     #[must_use]
-    pub fn set_service_level(mut self, sl: u8) -> Self {
+    pub fn set_service_level(&mut self, sl: u8) -> &mut Self {
         let _ = self.qp_attr.rq_attr.address_handler().service_level(sl);
         self
     }
@@ -902,7 +902,7 @@ impl RdmaBuilder {
     /// with the value of the source path bits. The value 0 indicates the port's base LID is used.
     #[inline]
     #[must_use]
-    pub fn set_src_path_bits(mut self, src_path_bits: u8) -> Self {
+    pub fn set_src_path_bits(&mut self, src_path_bits: u8) -> &mut Self {
         let _ = self
             .qp_attr
             .rq_attr
@@ -915,7 +915,7 @@ impl RdmaBuilder {
     /// useful if the rate of the packet origin is higher than the rate of the destination.
     #[inline]
     #[must_use]
-    pub fn set_static_rate(mut self, static_rate: u8) -> Self {
+    pub fn set_static_rate(&mut self, static_rate: u8) -> &mut Self {
         let _ = self
             .qp_attr
             .rq_attr
@@ -929,7 +929,7 @@ impl RdmaBuilder {
     /// those staying on the same path, so that they won't be reordered. 20 bits.
     #[inline]
     #[must_use]
-    pub fn set_flow_label(mut self, flow_label: u32) -> Self {
+    pub fn set_flow_label(&mut self, flow_label: u32) -> &mut Self {
         let _ = self
             .qp_attr
             .rq_attr
@@ -946,7 +946,7 @@ impl RdmaBuilder {
     /// won't leave the local subnet.
     #[inline]
     #[must_use]
-    pub fn set_hop_limit(mut self, hop_limit: u8) -> Self {
+    pub fn set_hop_limit(&mut self, hop_limit: u8) -> &mut Self {
         let _ = self
             .qp_attr
             .rq_attr
@@ -960,7 +960,7 @@ impl RdmaBuilder {
     /// handling them by the routers.
     #[inline]
     #[must_use]
-    pub fn set_traffic_class(mut self, traffic_class: u8) -> Self {
+    pub fn set_traffic_class(&mut self, traffic_class: u8) -> &mut Self {
         let _ = self
             .qp_attr
             .rq_attr
@@ -975,7 +975,7 @@ impl RdmaBuilder {
     /// verified within the Primary path.
     #[inline]
     #[must_use]
-    pub fn set_pkey_index(mut self, pkey_index: u16) -> Self {
+    pub fn set_pkey_index(&mut self, pkey_index: u16) -> &mut Self {
         let _ = self.qp_attr.init_attr.pkey_index(pkey_index);
         self
     }
@@ -985,7 +985,7 @@ impl RdmaBuilder {
     /// automatically fragment the messages to packet of this size.
     #[inline]
     #[must_use]
-    pub fn set_mtu(mut self, mtu: MTU) -> Self {
+    pub fn set_mtu(&mut self, mtu: MTU) -> &mut Self {
         let _ = self.qp_attr.rq_attr.mtu(mtu);
         self
     }
@@ -994,7 +994,7 @@ impl RdmaBuilder {
     ///
     /// This value is `3` as default for `Soft-RoCE`, and may be `2` for other devices.
     #[inline]
-    pub fn set_imm_flag_in_wc(self, imm_flag: u32) -> io::Result<Self> {
+    pub fn set_imm_flag_in_wc(&mut self, imm_flag: u32) -> io::Result<&mut Self> {
         use completion_queue::{IBV_WC_WITH_IMM, INIT_IMM_FLAG};
 
         let mut guard = INIT_IMM_FLAG.lock();
@@ -1025,7 +1025,7 @@ impl RdmaBuilder {
     /// period, and as a protective measure in other cases.
     #[inline]
     #[must_use]
-    pub fn set_cc_evnet_timeout(mut self, timeout: Duration) -> Self {
+    pub fn set_cc_evnet_timeout(&mut self, timeout: Duration) -> &mut Self {
         self.agent_attr.cc_event_timeout = timeout;
         self
     }
@@ -3471,9 +3471,9 @@ impl Rdma {
     /// };
     ///
     /// async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = RdmaBuilder::default().connect(addr).await?;
+    ///     let mut rdma = RdmaBuilder::default().connect(addr).await?;
     ///     let access = AccessFlag::LocalWrite | AccessFlag::RemoteRead;
-    ///     let mut rdma = rdma.set_new_qp_access(access);
+    ///     let _ = rdma.set_new_qp_access(access);
     ///     let _new_rdma = rdma.new_connect(addr).await?;
     ///     Ok(())
     /// }
@@ -3498,7 +3498,7 @@ impl Rdma {
     /// ```
     #[inline]
     #[must_use]
-    pub fn set_new_qp_access(mut self, qp_access: BitFlags<AccessFlag>) -> Self {
+    pub fn set_new_qp_access(&mut self, qp_access: BitFlags<AccessFlag>) -> &mut Self {
         let _ = self
             .clone_attr
             .qp_init_attr
@@ -3536,9 +3536,9 @@ impl Rdma {
     ///
     /// #[tokio::main]
     /// async fn server(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = RdmaBuilder::default().listen(addr).await?;
+    ///     let mut rdma = RdmaBuilder::default().listen(addr).await?;
     ///     let access = AccessFlag::LocalWrite | AccessFlag::RemoteRead;
-    ///     let mut rdma = rdma.set_new_max_rmr_access(access);
+    ///     let _ = rdma.set_new_max_rmr_access(access);
     ///     let new_rdma = rdma.listen().await?;
     ///     // receive the metadata of the lmr that had been requested by client
     ///     let _lmr = new_rdma.receive_local_mr().await?;
@@ -3560,7 +3560,7 @@ impl Rdma {
     /// ```
     #[inline]
     #[must_use]
-    pub fn set_new_max_rmr_access(mut self, max_rmr_access: BitFlags<AccessFlag>) -> Self {
+    pub fn set_new_max_rmr_access(&mut self, max_rmr_access: BitFlags<AccessFlag>) -> &mut Self {
         let _ = self
             .clone_attr
             .agent_attr
@@ -3584,8 +3584,8 @@ impl Rdma {
     /// };
     ///
     /// async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = RdmaBuilder::default().connect(addr).await?;
-    ///     let mut rdma = rdma.set_new_port_num(1_u8);
+    ///     let mut rdma = RdmaBuilder::default().connect(addr).await?;
+    ///     let _ = rdma.set_new_port_num(1_u8);
     ///     let _new_rdma = rdma.new_connect(addr).await?;
     ///     Ok(())
     /// }
@@ -3610,7 +3610,7 @@ impl Rdma {
     /// ```
     #[inline]
     #[must_use]
-    pub fn set_new_port_num(mut self, port_num: u8) -> Self {
+    pub fn set_new_port_num(&mut self, port_num: u8) -> &mut Self {
         let _ = self.clone_attr.rq_attr.address_handler().port_num(port_num);
         self
     }
@@ -3631,8 +3631,8 @@ impl Rdma {
     /// };
     ///
     /// async fn client(addr: SocketAddrV4) -> io::Result<()> {
-    ///     let rdma = RdmaBuilder::default().connect(addr).await?;
-    ///     let mut rdma = rdma.set_new_pd()?;
+    ///     let mut rdma = RdmaBuilder::default().connect(addr).await?;
+    ///     let _ = rdma.set_new_pd()?;
     ///     // then the `Rdma`s created by `new_connect` will have a new `ProtectionDomain`
     ///     let _new_rdma = rdma.new_connect(addr).await?;
     ///     Ok(())
@@ -3657,7 +3657,7 @@ impl Rdma {
     /// }
     /// ```
     #[inline]
-    pub fn set_new_pd(mut self) -> io::Result<Self> {
+    pub fn set_new_pd(&mut self) -> io::Result<&mut Self> {
         let _ = self
             .clone_attr
             .set_pd(Arc::new(self.ctx.create_protection_domain()?));

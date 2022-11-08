@@ -1060,8 +1060,8 @@ mod mr_with_multi_pd_test {
     };
 
     async fn client(addr: SocketAddrV4) -> io::Result<()> {
-        let rdma = RdmaBuilder::default().connect(addr).await?;
-        let mut rdma = rdma.set_new_pd()?;
+        let mut rdma = RdmaBuilder::default().connect(addr).await?;
+        let _ = rdma.set_new_pd()?;
         let layout = Layout::new::<char>();
         // then the `Rdma`s created by `new_connect` will have a new `ProtectionDomain`
         let new_rdma = rdma.new_connect(addr).await?;
